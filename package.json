@@ -1,0 +1,11 @@
+{
+  "name": "back-forty",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Back Forty — 2D side-view sandbox. Zero runtime dependencies; Node is a dev tool only (plan §B1).",
+  "scripts": {
+    "test": "node --test tests/",
+    "serve": "python3 -m http.server 8000"
+  }
+}

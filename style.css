@@ -1,0 +1,49 @@
+/* style.css — HUD and menu styles (plan §B9). Canvas stays at its internal
+   800x450 resolution; CSS scales it x2 with crisp pixels (plan §B2). */
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: #06080d;
+}
+
+body {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+#game {
+  width: 1600px;
+  height: 900px;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  background: #000;
+}
+
+/* Full-screen HUD/menu root, overlaid on the canvas. */
+#ui {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  font-family: monospace;
+  color: #d7e3f4;
+}
+
+/* F3 perf overlay (fps, frame ms, entity/particle counts). */
+#perf {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  display: none;
+  white-space: pre;
+  padding: 4px 7px;
+  font-size: 13px;
+  line-height: 1.35;
+  color: #9fe8a2;
+  background: rgba(0, 0, 0, 0.65);
+  border: 1px solid #1d3a25;
+}
