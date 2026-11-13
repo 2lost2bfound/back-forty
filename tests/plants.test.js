@@ -7,6 +7,7 @@ import { newGame } from '../src/state.js';
 import { stepTime } from '../src/sim/time.js';
 import { stepPlants, plantSeed, harvestPlant, stageOf, careOf } from '../src/sim/plants.js';
 import { stepEconomy, sellBatch, pricePerGram } from '../src/sim/economy.js';
+import { stepPlayer } from '../src/entities/player.js';
 
 const DT = 0.5;                         // one sim tick, real seconds
 const GH = DT / CONFIG.clock.secPerGh;
@@ -78,4 +79,25 @@ test('drying takes 24 gh then sells at full price', () => {
   const cash = s.player.cash;
   const v = sellBatch(s, batch);
   assert.equal(s.player.cash, cash + v);
+});
+
+test('pH kit: left click lowers pH, right click raises it (browser-check bug)', () => {
+  const { s, pot, plant } = setup();
+  const p = s.player;
+  p.tool = 'phkit';
+  p.inv.phkit = 5;
+  const aim = { aimX: pot.x * CONFIG.world.tile + 8, aimY: pot.y * CONFIG.world.tile + 8 };
+  const click = (key) => {
+    const inp = { left: false, right: false, up: false, down: false, sprint: false, jumpPressed: false,
+      digHeld: false, placePressed: false, select: 0, ...aim, [key]: true };
+    stepPlayer(s, inp, 1 / 60);
+    const idle = { ...inp, tendPressed: false, placePressed: false };
+    for (let i = 0; i < 600 && p.action; i++) stepPlayer(s, idle, 1 / 60);
+  };
+  plant.ph = 7.0;
+  click('tendPressed');
+  assert.ok(Math.abs(plant.ph - (7.0 - CONFIG.plants.phDose)) < 1e-9, `left click should lower pH, got ${plant.ph}`);
+  click('placePressed');
+  assert.ok(Math.abs(plant.ph - 7.0) < 1e-9, `right click should raise pH back, got ${plant.ph}`);
+  assert.equal(p.inv.phkit, 3, 'each adjustment uses one dose');
 });

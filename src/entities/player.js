@@ -398,7 +398,8 @@ function tryPrimary(state, p, inp) {
           state.events.push({ type: 'toast', msg: 'No pH doses left.' });
           return;
         }
-        startAction(state, p, tendKind, PS.actionSeconds[tendKind], { pot, plant });
+        // pH kit: left click = pH Down (right click = pH Up, in trySecondary).
+        startAction(state, p, tendKind, PS.actionSeconds[tendKind], { pot, plant, dir: tendKind === 'ph' ? -1 : 0 });
       }
     }
   }

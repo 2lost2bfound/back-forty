@@ -146,15 +146,15 @@ body {
 
 .hud-slot-name {
   position: absolute;
-  inset: 0;
+  inset: 10px 0 11px 0;          /* between the slot number and the count */
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 0 2px;
-  font-size: 8px;                /* 'Nutrients' fits the 48px slot */
+  padding: 0 1px;
+  font-size: 7px;                /* 'Nutrients' fits on one line in 48px */
   line-height: 1.1;
   text-align: center;
-  overflow-wrap: anywhere;       /* long names wrap, never spill */
+  overflow-wrap: normal;         /* wrap between words only, never mid-word */
   color: #d7e3f4;
   overflow: hidden;
 }
@@ -163,7 +163,8 @@ body {
   position: absolute;
   right: 3px;
   bottom: 1px;
-  font-size: 9px;
+  font-size: 8px;
+  white-space: nowrap;           /* '14 doses' stays on one line under the name */
   color: #ffe27a;
 }
 
