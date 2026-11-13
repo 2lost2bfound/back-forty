@@ -5,3 +5,4 @@
 // harness, so the run still fails on any failing test. Bare `node --test`
 // (default discovery) and `node --test tests/*.test.js` also work.
 import './rng.test.js';
+import './world.test.js';

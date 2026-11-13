@@ -5,6 +5,7 @@
 export function initInput(canvas) {
   const keys = new Set();        // currently held key codes
   const justPressed = new Set(); // pressed since last endFrame()
+  const justButtons = new Set(); // mouse buttons pressed since last endFrame()
   const mouse = { x: 0, y: 0, buttons: 0, wheel: 0 };
 
   // Keys the game owns; stop the browser from scrolling/toggling on them.
@@ -36,6 +37,7 @@ export function initInput(canvas) {
 
   function onMouseDown(e) {
     mouse.buttons |= 1 << e.button;
+    justButtons.add(e.button);
   }
 
   function onMouseUp(e) {
@@ -66,9 +68,15 @@ export function initInput(canvas) {
       return justPressed.has(code);
     },
 
+    /** Mouse button (0 left, 2 right) was pressed since the last endFrame(). */
+    wasButtonPressed(button) {
+      return justButtons.has(button);
+    },
+
     /** Call once per rendered frame, after update+render. */
     endFrame() {
       justPressed.clear();
+      justButtons.clear();
       mouse.wheel = 0;
     },
   };

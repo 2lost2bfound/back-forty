@@ -1,22 +1,57 @@
 // main.js — boot, fixed-step loop, perf overlay (plan §B9).
 // Loop shape follows plan §B3: clamped dt, 60 Hz fixed physics, 2 Hz sim tick.
-// The frame loop allocates nothing: the stress pool is a preallocated
-// Float32Array and the overlay writes to an existing DOM node.
+// The frame loop allocates nothing: input is a reused object, the stress pool
+// is a preallocated Float32Array and the overlay writes to an existing DOM node.
 
 import { CONFIG } from './config.js';
 import { createRng } from './rng.js';
 import { initInput } from './ui/input.js';
 import { createRenderer } from './render/renderer.js';
+import { newGame } from './state.js';
+import { stepPlayer } from './entities/player.js';
+import { T } from './world/tiles.js';
 
 // ---------------------------------------------------------------- boot ----
 
 const canvas = document.getElementById('game');
+const state = newGame(CONFIG.dev.seed);
+state.paused = false;
+state.stressOn = false;
+state.overlayOn = false;
+
 const renderer = createRenderer(canvas);
 const input = initInput(canvas);
 
 const perfEl = document.getElementById('perf');
 const PHYS_DT = 1 / CONFIG.loop.physicsHz; // 1/60 s
 const SIM_DT = 1 / CONFIG.loop.simHz;      // 0.5 s = 1/60 game hour
+
+// Input snapshot for the physics step: one reused plain object, so the player
+// module stays DOM-free (plan §B3 rule).
+const inp = {
+  left: false, right: false, up: false, down: false,
+  sprint: false, jumpPressed: false,
+  digHeld: false, placePressed: false,
+  aimX: 0, aimY: 0, select: 0,
+};
+
+function readInput() {
+  const k = input.keys;
+  inp.left = k.has('KeyA');
+  inp.right = k.has('KeyD');
+  inp.up = k.has('KeyW');
+  inp.down = k.has('KeyS');
+  inp.sprint = k.has('ShiftLeft') || k.has('ShiftRight');
+  inp.jumpPressed = input.wasPressed('KeyW') || input.wasPressed('Space');
+  inp.digHeld = (input.mouse.buttons & 1) !== 0;       // left click: dig
+  inp.placePressed = input.wasButtonPressed(2);        // right click: place
+  inp.aimX = input.mouse.x + renderer.cam.rx;          // mouse -> world cell
+  inp.aimY = input.mouse.y + renderer.cam.ry;
+  inp.select = input.wasPressed('Digit1') ? T.DIRT
+    : input.wasPressed('Digit2') ? T.WOOD
+    : input.wasPressed('Digit3') ? T.LADDER
+    : 0;
+}
 
 // Preallocated stress-rectangle pool: [x, y, vx, vy] per rectangle.
 const stress = CONFIG.stress;
@@ -32,19 +67,17 @@ for (let i = 0; i < stress.rectangles; i++) {
     (stressRng.chance(0.5) ? 1 : -1);
 }
 
-// Game state — grows into the full save object (plan §B4) in later milestones.
-const state = {
-  paused: false,
-  simTicks: 0,
-  stressOn: false,
-  overlayOn: false,
-};
-
 // ------------------------------------------------------------- update ----
 
-/** 60 Hz fixed step: movement, physics, camera. (§B3 stepPhysics) */
+/** 60 Hz fixed step: player movement, dig/place actions. (§B3 stepPhysics) */
 function stepPhysics(s, dt) {
-  if (!s.stressOn) return;
+  readInput();
+  stepPlayer(s, inp, dt);
+  if (s.stressOn) updateStress(dt);
+}
+
+/** Stress-scene rectangles bounce inside the canvas (F4 perf gate). */
+function updateStress(dt) {
   const rects = stressRects;
   const count = stress.rectangles;
   const w = CONFIG.canvas.width;
@@ -64,7 +97,7 @@ function stepPhysics(s, dt) {
 }
 
 /** 2 Hz fixed step: time, weather, plants, heat, economy, ... (§B3 stepSim).
- * M0 has no systems yet; the tick counter drives the visible test pattern. */
+ * M1 has no systems yet; the tick counter stays visible in tests/debug. */
 function stepSim(s, dt) {
   s.simTicks++;
 }
@@ -74,11 +107,13 @@ function stepSim(s, dt) {
 let last = performance.now();
 let physAcc = 0;
 let simAcc = 0;
+let lastDt = 0;
 
 function frame(now) {
   const rawMs = now - last; // real frame delta, before the hidden-tab clamp
   const dt = Math.min(rawMs / 1000, CONFIG.loop.maxFrameDt);
   last = now;
+  lastDt = dt;
 
   if (!state.paused) {
     physAcc += dt;
@@ -115,8 +150,7 @@ function frame(now) {
 }
 
 function render() {
-  renderer.clear();
-  renderer.drawTestPattern(state.simTicks);
+  renderer.draw(state, state.paused ? 0 : lastDt);
   if (state.stressOn) {
     renderer.drawStressRects(stressRects, stress.rectangles);
   }
@@ -152,10 +186,13 @@ function updateOverlay(now, rawMs) {
   }
   avg = histLen ? avg / histLen : 0;
   const fps = Math.round((framesSince * 1000) / span);
-  const entities = state.stressOn ? stress.rectangles : 0;
+  const p = state.player;
+  const ents = 1 + (state.stressOn ? stress.rectangles : 0);
   const text =
     `fps ${fps}  frame ${avg.toFixed(1)}ms avg / ${worst.toFixed(1)}ms max\n` +
-    `ents ${entities}  parts 0  ${state.stressOn ? 'STRESS (F4)' : ''}`;
+    `ents ${ents}  parts 0  dirty ${state.dirtyChunks.size}` +
+    `${state.stressOn ? '  STRESS (F4)' : ''}\n` +
+    `pos ${(p.x | 0)},${(p.y | 0)}  stam ${p.stamina | 0}  sel ${p.selected}`;
   framesSince = 0;
   if (text !== lastText) {
     lastText = text;
