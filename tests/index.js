@@ -6,3 +6,5 @@
 // (default discovery) and `node --test tests/*.test.js` also work.
 import './rng.test.js';
 import './world.test.js';
+import './plants.test.js';
+import './save.test.js';
