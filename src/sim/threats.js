@@ -393,6 +393,7 @@ function stepDog(state, dt) {
       damageEntity(state, prey, DG.bite * dt, 'dog');
       if (!prey.wasBitten) {
         prey.wasBitten = true;
+        state.events.push({ type: 'dogBite', x: dog.x });
         if (rngOf(state, (r) => r.chance(T.fleeBitten))) prey.scared = true;
       }
       if (prey.armed || prey.state === 'fight') { dog.hp -= T.knife * dt; if (dog.hp <= 0) { dog.hp = 0; state.events.push({ type: 'toast', msg: 'Your dog is hurt. The vet can fix him.' }); } }

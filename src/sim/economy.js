@@ -12,6 +12,8 @@
 import { CONFIG } from '../config.js';
 import { withStateRng } from '../rng.js';
 import { rollSeedGenome } from './genetics.js';
+import { seedBagOf } from './plants.js';
+import { strainUnlocked } from './mastery.js';
 import { canBuyDog, giveDog, dogHurt, healDog } from '../entities/dog.js';
 import { buyTruce } from './threats.js';
 import {
@@ -39,7 +41,7 @@ export function shopOpen(time, shopKey) {
 
 /** A shop's stock in menu order: {key, name, price, service, unreg}. */
 export function shopStock(shopKey, state) {
-  return E.stock[shopKey].map((key) => {
+  return E.stock[shopKey].filter((key) => !state || !seedStrain(key) || strainUnlocked(state, seedStrain(key))).map((key) => {
     const unreg = shopKey === 'alley' && E.unregStock.includes(key);
     const base = key === 'bribe' && state ? bribePrice(state) : E.prices[key];
     return {
@@ -50,6 +52,9 @@ export function shopStock(shopKey, state) {
   });
 }
 
+/** Strain key whose seeds an item key is, or null. */
+const seedStrain = (key) => Object.keys(CONFIG.strains).find((k) => CONFIG.strains[k].item === key) || null;
+
 export const hardwareStock = () => shopStock('hardware');
 
 function grantItem(state, key, shopKey) {
@@ -59,12 +64,13 @@ function grantItem(state, key, shopKey) {
     state.player.unreg = { ...(state.player.unreg || {}), [key]: true };
     state.player.gunUnregistered = true;
   }
-  if (key === 'seeds') {
+  if (seedStrain(key)) {
     // Purchased seeds are feminized and vary ±3 per trait (plan §A4); the
     // genome is rolled at purchase with the save's PRNG and queued in the
-    // seed bag. The starter seeds are exact base-strain genomes.
-    state.player.seedBag.push(withStateRng(state, (rng) => rollSeedGenome('ditch', rng)));
-    inv.seeds = (inv.seeds || 0) + 1;
+    // strain's seed bag. The starter seeds are exact base-strain genomes.
+    const sk = seedStrain(key);
+    seedBagOf(state.player, sk).push(withStateRng(state, (rng) => rollSeedGenome(sk, rng)));
+    inv[key] = (inv[key] || 0) + 1;
   } else if (key === 'nutrients') {
     inv.nutrients = (inv.nutrients || 0) + E.doses.nutrients;
   } else if (key === 'phkit') {
@@ -85,6 +91,7 @@ export function buyItem(state, key, shopKey = 'hardware') {
   if (!entry) return { ok: false, msg: 'They don\'t stock that.' };
   if (!shopOpen(state.time, shopKey)) return { ok: false, msg: `${E[shopKey].label} is closed.` };
   const p = state.player;
+  if (seedStrain(key) && !strainUnlocked(state, seedStrain(key))) return { ok: false, msg: 'Those seeds are not on sale yet.' };
   if (key === 'bribe') return bribeDeputy(state);
   if (key === 'truce') return buyTruce(state);
   if (key === 'dog' && !canBuyDog(state)) return { ok: false, msg: 'You already have a dog.' };

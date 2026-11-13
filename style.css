@@ -324,3 +324,16 @@ body {
 .hud-bar-fill.heat.tier2 { background: #e08a30; }
 .hud-bar-fill.heat.tier3 { background: #d8402e; }
 .hud-heat { margin-top: 4px; }
+
+/* Grower's journal and plant trait bars (M7) */
+.xp-bar { height: 8px; margin: 3px 0 6px; background: #1a2336; border: 1px solid #2a3550; }
+.xp-fill { height: 100%; background: #9fe8a2; }
+.journal-chart { display: flex; align-items: flex-end; gap: 3px; height: 64px; margin-top: 4px; }
+.journal-col { display: flex; align-items: flex-end; gap: 1px; }
+.journal-yield, .journal-quality { width: 6px; }
+.journal-yield { background: #6fcf74; }
+.journal-quality { background: #e0c04a; }
+.trait-row { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
+.trait-bar { position: relative; width: 80px; height: 6px; background: #1a2336; }
+.trait-fill { height: 100%; background: #6fb0dd; }
+.trait-ghost { position: absolute; top: -2px; width: 2px; height: 10px; background: #ffe27a; }

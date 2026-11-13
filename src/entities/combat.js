@@ -55,6 +55,7 @@ export function startReload(state) {
   if (a.mag >= a.size || a.bag <= 0) return false;
   const need = Math.min(a.size - a.mag, a.bag);
   p.reload = { key, t: 0, dur: w.perShell ? C.reloadPerShell * need : C.reloadSeconds, n: need };
+  state.events.push({ type: 'reload' });
   return true;
 }
 
@@ -167,6 +168,7 @@ export function melee(state, key = state.player.tool) {
   }
   state.events.push({ type: 'swing', weapon: key });
   if (!hit) return { ok: true, hit: false };
+  state.events.push({ type: 'meleeHit', weapon: key });
   if (w.knock) hit.x += p.facing * w.knock;
   damageEntity(state, hit, w.dmg, 'melee');
   return { ok: true, hit: true, target: hit };

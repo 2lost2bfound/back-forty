@@ -10,6 +10,9 @@ import {
   shopStock, shopOpen, buyItem, orderOf, fillQuote, fillOrder, nowGh, payFee,
   buyerLevel, buyerMult, BUYER_KEYS, carriedGrams, carryCap,
 } from '../sim/economy.js';
+import { journalView, hasLevel } from '../sim/mastery.js';
+import { baseGenome } from '../sim/genetics.js';
+import * as audio from '../audio/audio.js';
 import { refuseFee, payTribute, rv } from '../sim/threats.js';
 import {
   boardCandidates, describe, hire, fire, giveBonus, bailOut, dockPay, threaten, toggleOutgoing, placeMarker, crewOf,
@@ -159,7 +162,7 @@ export function initMenus(hud) {
     const eco = state.economy;
     phonePanel.body.textContent = '';
     const tabs = el('div', 'menu-row', phonePanel.body);
-    for (const t of ['orders', 'contacts', 'ledger', 'heat', 'crew']) {
+    for (const t of ['orders', 'contacts', 'ledger', 'heat', 'crew', 'journal']) {
       const b = el('button', 'menu-btn', tabs, t === phoneTab ? `[${t}]` : t);
       b.onclick = () => { phoneTab = t; renderPhone(); };
     }
@@ -201,6 +204,8 @@ export function initMenus(hud) {
       }
     } else if (phoneTab === 'crew') {
       renderCrewTab(state);
+    } else if (phoneTab === 'journal') {
+      renderJournal(state);
     } else if (phoneTab === 'contacts') {
       for (const key of BUYER_KEYS) {
         const b = eco.buyers[key];
@@ -218,6 +223,27 @@ export function initMenus(hud) {
           // Skimming shows only once you have sold to that buyer yourself (plan A8).
           `${e.expected !== undefined && eco.buyers[e.buyer].personal ? ` (expected $${Math.round(e.expected)})` : ''}`);
       }
+    }
+  }
+
+  /** Grower's journal (plan §A10): XP bar, perks, last 20 harvests as bars. */
+  function renderJournal(state) {
+    const body = phonePanel.body;
+    const v = journalView(state);
+    const span = v.nextXp === null ? 1 : v.nextXp - v.levelStart;
+    const pct = v.nextXp === null ? 100 : Math.round(100 * (v.xp - v.levelStart) / span);
+    el('div', 'menu-note', body, `Grower level ${v.level} · ${Math.round(v.xp)} XP` + (v.nextXp === null ? ' (max)' : ` / ${v.nextXp}`));
+    const bar = el('div', 'xp-bar', body);
+    el('div', 'xp-fill', bar).style.width = `${pct}%`;
+    for (const p of v.perks) el('div', 'menu-row', body, `${p.got ? '[x]' : '[ ]'} L${p.level}: ${p.text}`);
+    el('div', 'menu-note', body, `Last ${v.harvests.length} harvests (green = grams, gold = quality; older to the left)`);
+    const chart = el('div', 'journal-chart', body);
+    const maxG = Math.max(1, ...v.harvests.map((h) => h.grams));
+    for (const h of v.harvests) {
+      const col = el('div', 'journal-col', chart);
+      col.title = `Day ${h.day} ${h.strainName}${h.generation ? ' G' + h.generation : ''}: ${h.grams.toFixed(1)} g, quality ${h.quality}`;
+      el('div', 'journal-yield', col).style.height = `${Math.round(60 * h.grams / maxG)}px`;
+      el('div', 'journal-quality', col).style.height = `${Math.round(60 * h.quality / 100)}px`;
     }
   }
 
@@ -295,7 +321,9 @@ export function initMenus(hud) {
     const inv = state.player.inv;
     const tools = ['can', 'pickaxe', 'moisture_meter', 'ph_meter', 'loupe'];
     const keys = Object.keys(inv).filter((k) => inv[k] > 0);
-    if (keys.length === 0) el('div', 'menu-note', invPanel.body, 'Empty.');
+    const cuts = state.player.cuttings || [];
+    if (cuts.length > 0) el('div', 'menu-note', invPanel.body, `Cuttings x${cuts.length} (C cuts one from a vegetative plant; E plants it first)`);
+    if (keys.length === 0 && cuts.length === 0) el('div', 'menu-note', invPanel.body, 'Empty.');
     for (const key of keys) {
       const row = el('div', 'menu-row', invPanel.body);
       const count = key === 'nutrients' || key === 'phkit' ? `${inv[key]} doses` : inv[key];
@@ -322,6 +350,18 @@ export function initMenus(hud) {
     save.onclick = () => window.dispatchEvent(new CustomEvent('backforty:save'));
     load.onclick = () => window.dispatchEvent(new CustomEvent('backforty:load'));
     resume.onclick = () => closeAll();
+    // Sound: master / effects / music sliders and mute (plan §B8).
+    const vols = audio.getVolumes();
+    for (const [kind, label] of [['master', 'Master'], ['sfx', 'Effects'], ['music', 'Music']]) {
+      const r = el('div', 'menu-row', pausePanel.body, `${label} `);
+      const sl = el('input', '', r);
+      sl.type = 'range'; sl.min = 0; sl.max = 1; sl.step = 0.05; sl.value = vols[kind];
+      sl.oninput = () => audio.setVolume(kind, +sl.value);
+    }
+    const mr = el('div', 'menu-row', pausePanel.body, 'Mute ');
+    const mute = el('input', '', mr);
+    mute.type = 'checkbox'; mute.checked = vols.muted;
+    mute.onchange = () => audio.setMuted(mute.checked);
     show(pausePanel, 'Paused', 'pause');
   }
 
@@ -368,20 +408,28 @@ export function initMenus(hud) {
     lastHoverKey = key;
 
     hoverPanel.textContent = '';
-    el('div', 'plant-panel-title', hoverPanel, `${plant.strainName}`);
+    el('div', 'plant-panel-title', hoverPanel, `${plant.strainName}${plant.generation ? ` · G${plant.generation}` : ''}`);
+    const base = baseGenome(plant.strainKey);
+    for (const k of ['Y', 'P', 'R', 'S']) {
+      const r = el('div', 'trait-row', hoverPanel, k);
+      const bar = el('div', 'trait-bar', r);
+      el('div', 'trait-fill', bar).style.width = `${plant.genome[k]}%`;
+      el('div', 'trait-ghost', bar).style.left = `${base[k]}%`;
+      el('span', '', r, ` ${plant.genome[k]}`);
+    }
     const rows = [
       `Stage: ${stage}${stage === 'ripe' ? ' — harvest now (E)' : ''}`,
       `Health: ${Math.round(plant.health)} (avg ${Math.round(avgHealthOf(plant))}, care ${(careOf(plant) * 100) | 0}%)`,
     ];
     // Without tools you see bands only; tools give exact numbers (plan §A4).
-    rows.push(inv.moisture_meter
+    rows.push(inv.moisture_meter || hasLevel(state, CONFIG.mastery.exactMoistureLevel)
       ? `Moisture: ${plant.moisture.toFixed(0)}`
       : `Moisture: ${moistureBand(plant.moisture)}`);
     rows.push(inv.ph_meter
       ? `pH: ${plant.ph.toFixed(2)}`
       : `pH: ${phBand(plant.ph)}`);
     rows.push(`Nutrients: ${nutrientBand(plant.nutrients)}`);
-    if (inv.loupe) {
+    if (inv.loupe || hasLevel(state, CONFIG.mastery.exactRipeLevel)) {
       const h = litHoursToRipe(state, plant, hover.pot);
       rows.push(h === null ? 'To ripe: — (no light)'
         : h === 0 ? (stage === 'ripe' ? 'Ripe window: NOW' : `Overripe: ${Math.round(plant.overHours)} gh`)

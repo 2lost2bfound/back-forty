@@ -17,11 +17,12 @@ import {
 } from './state.js';
 import { stepPlayer, aimedPot, assignHotbar, interactHint } from './entities/player.js';
 import { plantByPot } from './sim/plants.js';
-import { sleepStart } from './sim/time.js';
+import { sleepStart, isLitHour } from './sim/time.js';
 import { stepSim } from './sim/sim.js';
 import { stepNpcs } from './entities/npc.js';
 import { stepCombat } from './entities/combat.js';
 import { T } from './world/tiles.js';
+import * as audio from './audio/audio.js';
 
 // ---------------------------------------------------------------- boot ----
 
@@ -36,6 +37,9 @@ const input = initInput(document.getElementById('game'));
 const hud = initHud();
 const menus = initMenus(hud);
 
+// Browsers only allow sound after a user gesture (plan §B8).
+for (const ev of ['pointerdown', 'keydown']) window.addEventListener(ev, () => audio.start());
+
 const perfEl = document.getElementById('perf');
 const PHYS_DT = 1 / CONFIG.loop.physicsHz; // 1/60 s
 const SIM_DT = 1 / CONFIG.loop.simHz;      // 0.5 s = 1/60 game hour
@@ -45,7 +49,7 @@ const SIM_DT = 1 / CONFIG.loop.simHz;      // 0.5 s = 1/60 game hour
 const inp = {
   left: false, right: false, up: false, down: false,
   sprint: false, jumpPressed: false,
-  bikePressed: false, reloadPressed: false,
+  bikePressed: false, reloadPressed: false, clonePressed: false,
   digHeld: false, tendPressed: false, placePressed: false, interactPressed: false,
   aimX: 0, aimY: 0, select: 0,
   hotbar: -1, wheel: 0, alt: false,
@@ -65,6 +69,7 @@ function readInput() {
   inp.interactPressed = input.wasPressed('KeyE');
   if (input.wasPressed('KeyB')) inp.bikePressed = true;
   if (input.wasPressed('KeyR')) inp.reloadPressed = true;
+  if (input.wasPressed('KeyC')) inp.clonePressed = true;
   inp.alt = k.has('AltLeft') || k.has('AltRight');
   inp.aimX = input.mouse.x + renderer.cam.rx;          // mouse -> world cell
   inp.aimY = input.mouse.y + renderer.cam.ry;
@@ -85,6 +90,7 @@ function flushOneShots() {
   inp.interactPressed = false;
   inp.bikePressed = false;
   inp.reloadPressed = false;
+  inp.clonePressed = false;
   inp.hotbar = -1;
   inp.wheel = 0;
   inp.select = 0;
@@ -122,11 +128,43 @@ function updateStress(dt) {
 
 // ------------------------------------------------------------- events ----
 
+// Sim events -> sound (plan §B8). The sim never calls audio; this is the only wire.
+const SFX_ACTION = { pour: 'pour', refill: 'pour', feed: 'feed', ph: 'feed', plant: 'place', place: 'place',
+  harvest: 'harvest', snip: 'snip', cash: 'cash', jump: 'jump', dig: 'dig' };
+const SFX_GUN = { pistol22: 'gunshot1', pistol9: 'gunshot1', shotgun: 'gunshot2', rifle: 'gunshot3' };
+const SFX_EVENT = { sale: 'cash', order: 'phoneBuzz', discover: 'phoneBuzz', missed: 'phoneBuzz', hurt: 'hurt', reload: 'reload',
+  meleeHit: 'batHit', dogBite: 'bite', raidStart: 'siren', helicopter: 'siren', theft: 'lockpick', sleep: 'door',
+  openShop: 'door', levelUp: 'levelUp' };
+
+function playSfx(ev) {
+  let name = null;
+  if (ev.type === 'action') name = SFX_ACTION[ev.name];
+  else if (ev.type === 'shot') name = SFX_GUN[ev.weapon];
+  else if (ev.type === 'swing') name = ev.weapon === 'bat' ? 'batSwing' : null;
+  else if (ev.type === 'alert') name = ev.kind === 'dog' ? 'bark' : 'alarm';
+  else name = SFX_EVENT[ev.type];
+  if (name) audio.sfx(name, ev.x !== undefined ? ev.x - (renderer.cam.rx + CONFIG.canvas.width / 2) : 0);
+}
+
+/** Footsteps by distance walked; ambient bed by time of day; tension layer in raids and fights. */
+let lastStep = 0;
+function stepAudio() {
+  const p = state.player;
+  const stride = Math.floor(p.walkDist / CONFIG.audio.footstepPx);
+  if (stride !== lastStep) { if (p.onGround && !state.paused) audio.sfx('footstep'); lastStep = stride; }
+  audio.setMusic(isLitHour(state.time.hour) ? 'day' : 'night');
+  audio.setTension((state.cops && state.cops.length > 0) || (state.entities && state.entities.length > 0));
+}
+
 /** Consume the sim's event queue once per frame (plan §B3). */
 function processEvents() {
   const evs = state.events.splice(0);
   for (const ev of evs) {
+    playSfx(ev);
     switch (ev.type) {
+      case 'levelUp':
+        hud.toast(`Grower level ${ev.level}!${ev.perk ? ' ' + ev.perk : ''}`);
+        break;
       case 'dawn': {
         const r = autosave(state, browserStorage);
         hud.toast(r && r.ok ? `Autosaved (dawn of day ${ev.day})` : 'Autosave failed');
@@ -291,6 +329,7 @@ function frame(now) {
   }
 
   processEvents();
+  stepAudio();
 
   // HUD + hover panel at ui.updateHz (DOM, dirty-checked).
   if (now - lastUi >= 1000 / CONFIG.ui.updateHz) {

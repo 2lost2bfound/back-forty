@@ -12,7 +12,7 @@ export function initInput(canvas) {
   const gameKeys = new Set([
     'Space', 'Tab', 'AltLeft', 'AltRight', 'F3', 'F4',
     'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
-    'KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyE', 'KeyR', 'KeyI', 'KeyF', 'KeyB',
+    'KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyE', 'KeyR', 'KeyI', 'KeyF', 'KeyB', 'KeyC',
   ]);
 
   function onKeyDown(e) {

@@ -15,7 +15,8 @@
 
 import { CONFIG } from '../config.js';
 import { T, tileAt } from '../world/tiles.js';
-import { baseGenome } from './genetics.js';
+import { baseGenome, cloneGenome, withGeneticsRng } from './genetics.js';
+import { addXp, recordHarvest, hasLevel, levelOf } from './mastery.js';
 import { isLitHour, isRaining } from './time.js';
 
 const P = CONFIG.plants;
@@ -29,8 +30,9 @@ const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 export function stageOf(plant) {
   if (plant.dead) return 'dead';
   if (plant.progress >= 1) {
-    if (plant.overHours < P.ripeWindowGh) return 'ripe';
-    if (plant.overHours < P.ripeWindowGh + P.overripeWindowGh) return 'overripe';
+    const win = plant.ripeWindowGh || P.ripeWindowGh; // L9 perk widens it
+    if (plant.overHours < win) return 'ripe';
+    if (plant.overHours < win + P.overripeWindowGh) return 'overripe';
     return 'rotten';
   }
   if (plant.progress >= P.stageProgress.flower) return 'flowering';
@@ -116,7 +118,7 @@ export function phUptake(plant) {
 
 /** Create a plant in an empty pot. Genome defaults to the exact base strain
  *  (the starter seeds); purchased seeds pass a rolled genome in. */
-export function createPlant(state, pot, strainKey, genome) {
+export function createPlant(state, pot, strainKey, genome, opts = {}) {
   if (state.plants.length >= CONFIG.limits.plants) return null;
   const strain = CONFIG.strains[strainKey];
   const plant = {
@@ -125,10 +127,10 @@ export function createPlant(state, pot, strainKey, genome) {
     strainKey,
     strainName: strain.name,
     genome: genome || baseGenome(strainKey),
-    lineId: null,          // M7 (clone lines)
-    generation: 0,         // M7
+    lineId: opts.lineId ?? null,        // clone line (set at the first cut)
+    generation: opts.generation || 0,   // clone generation: mother's + 1
     sex: null,             // M11 (shop seeds never male)
-    progress: 0,           // 0..1 share of total lit hours
+    progress: opts.progress || 0,       // 0..1 share of total lit hours
     overHours: 0,          // gh since 100% (ripe/overripe/rotten clock)
     moisture: P.startMoisture,
     ph: pot.soilPh,        // the soil's pH carries over on replanting
@@ -152,9 +154,61 @@ export function createPlant(state, pot, strainKey, genome) {
 /** Plant a seed into an empty pot (uses a purchased genome if one is queued). */
 export function plantSeed(state, pot, strainKey) {
   if (pot.plantId) return null;
-  const bag = state.player.seedBag;
+  const bag = seedBagOf(state.player, strainKey);
   const genome = bag.length > 0 ? bag.shift() : null;
   const plant = createPlant(state, pot, strainKey, genome);
+  if (plant) pot.plantId = plant.id;
+  return plant;
+}
+
+/** Queue of purchased seed genomes for a strain (Ditch Weed keeps the M2 `seedBag`). */
+export function seedBagOf(player, strainKey) {
+  if (strainKey === 'ditch') return player.seedBag;
+  const bags = player.seedBags || (player.seedBags = {});
+  return bags[strainKey] || (bags[strainKey] = []);
+}
+
+/**
+ * What E plants into an empty pot: a cutting first, else seeds of the rarest
+ * strain you carry (Widow Kush, Blue Haze, Ditch Weed). Null if nothing.
+ */
+export function plantable(player) {
+  if ((player.cuttings || []).length > 0) return { cutting: true };
+  for (const key of ['widow', 'blue', 'ditch']) {
+    if ((player.inv[CONFIG.strains[key].item] || 0) > 0) return { strainKey: key };
+  }
+  return null;
+}
+
+// ------------------------------------------------------------- clones -----
+
+/** A vegetative plant can be cut (plan §A10). */
+export const canCut = (plant) => !plant.dead && stageOf(plant) === 'vegetative';
+
+/** Cut a cutting: copies the genome with drift, mother loses 5 health, line id assigned. */
+export function takeCutting(state, mother) {
+  if (!canCut(mother)) return null;
+  const G = CONFIG.genetics;
+  if (mother.lineId == null) mother.lineId = state.nextId++;
+  const genome = withGeneticsRng(state, (rng) => cloneGenome(mother.genome, mother.strainKey, careOf(mother), rng));
+  mother.health = Math.max(1, mother.health - G.cloneMotherDamage);
+  const cutting = { strainKey: mother.strainKey, genome, lineId: mother.lineId, generation: mother.generation + 1 };
+  const cuts = state.player.cuttings || (state.player.cuttings = []);
+  cuts.push(cutting);
+  return cutting;
+}
+
+/** Plant the oldest cutting: always roots at L7+, else 85%. Null if it failed to root. */
+export function plantCutting(state, pot) {
+  const c = state.player.cuttings.shift();
+  const roll = withGeneticsRng(state, (rng) => rng.next());
+  if (!hasLevel(state, CONFIG.mastery.cloneRootLevel) && roll >= CONFIG.mastery.cloneRootChance) {
+    state.events.push({ type: 'toast', msg: 'The cutting did not root.' });
+    return null;
+  }
+  const plant = createPlant(state, pot, c.strainKey, c.genome, {
+    progress: CONFIG.genetics.cloneStartProgress, lineId: c.lineId, generation: c.generation,
+  });
   if (plant) pot.plantId = plant.id;
   return plant;
 }
@@ -214,6 +268,7 @@ export function stepPlants(state, gh) {
     const pot = potOf(state, plant);
     if (!pot) { killPlant(state, plant, 'its pot vanished'); continue; }
 
+    plant.ripeWindowGh = levelOf(state) >= CONFIG.mastery.ripeWindowLevel ? CONFIG.mastery.ripeWindowGh : P.ripeWindowGh;
     const stage = stageOf(plant);
     const soil = pot.soil || 'cheap';
     const sun = tickLight(state, pot, gh);
@@ -250,7 +305,8 @@ export function stepPlants(state, gh) {
       let dmg = 0;
       for (const k of stressors) if (k !== 'pest') dmg += P.stressDamage[k];
       // Mites deal a flat 3 health/gh (plan §A6); resilience only softens stress.
-      plant.health -= (dmg * resilienceMult(plant.genome) + (plant.infested ? P.stressDamage.pest : 0)) * gh;
+      const perk = levelOf(state) >= CONFIG.mastery.stressLevel ? CONFIG.mastery.stressDamageMult : 1;
+      plant.health -= (dmg * resilienceMult(plant.genome) * perk + (plant.infested ? P.stressDamage.pest : 0)) * gh;
       if (plant.health <= 0) { killPlant(state, plant, 'stress'); continue; }
     } else {
       plant.health = Math.min(100, plant.health + P.healthRegen * gh);
@@ -354,7 +410,7 @@ export function harvestPlant(state, plant) {
   let timingY = 1, timingQ = 1, timingName = 'ripe window';
   if (stage === 'overripe') {
     timingQ = Math.max(P.overripeQMin,
-      1 - P.overripeQDropPerGh * (plant.overHours - P.ripeWindowGh));
+      1 - P.overripeQDropPerGh * (plant.overHours - (plant.ripeWindowGh || P.ripeWindowGh)));
     timingName = 'overripe';
   } else if (stage === 'rotten') {
     timingY = 0; timingQ = 0; timingName = 'rotten';
@@ -387,6 +443,14 @@ export function harvestPlant(state, plant) {
   const idx = state.plants.indexOf(plant);
   if (idx >= 0) state.plants.splice(idx, 1);
 
+  // Mastery: journal entry, comparison to the line's previous harvest, then XP.
+  const qDone = Math.round(quality * 10) / 10;
+  const prev = batch ? recordHarvest(state, {
+    day: state.time.day, strainName: plant.strainName, grams, quality: qDone,
+    generation: plant.generation, lineId: plant.lineId,
+  }) : null;
+  const vs = prev ? `${grams - prev.grams >= 0 ? '+' : ''}${(grams - prev.grams).toFixed(1)} g, ` +
+    `${quality - prev.quality >= 0 ? '+' : ''}${Math.round(quality - prev.quality)} quality vs. the last of this line` : null;
   state.events.push({
     type: 'harvest',
     strainName: plant.strainName,
@@ -400,8 +464,10 @@ export function harvestPlant(state, plant) {
       `x ${fmt(soilMult)} soil`,
       `= ${grams.toFixed(1)} g wet`,
       `Quality: ${g.P} potency x ${fmt(careMult)} care x ${fmt(timingQ)} timing = ${quality.toFixed(1)}`,
+      ...(vs ? [vs] : []),
     ] : ['The plant was rotten. Nothing usable came out.'],
   });
+  if (batch) addXp(state, grams, quality);
   return batch;
 }
 

@@ -73,12 +73,16 @@ export function createPlayer(x, y) {
       moisture_meter: 0, ph_meter: 0, loupe: 0, rack: 0,
       fists: 1,                 // so fists can sit on the hotbar (plan §A9 tier 0)
     },
-    seedBag: [],                // purchased seed genomes, used in order
+    seedBag: [],                // purchased Ditch Weed genomes, used in order
+    seedBags: {},               // purchased genomes for the other strains
+    cuttings: [],               // clones in hand: {strainKey, genome, lineId, generation}
+    journal: [],                // last 20 harvests (mastery.js)
+    lineLast: {},               // last harvest per clone line, for the report card
     cash: CONFIG.economy.startCash,
     bank: 0,                    // clean money (M10; exists for save shape)
     debt: 0,                    // unpaid fines (blocks the license, M10)
     arrests: 0,                 // third arrest = game over (plan §A15)
-    level: 1, xp: 0,            // mastery.js is M7; level 1 throughout M2
+    level: 1, xp: 0,            // Grower level and XP (mastery.js)
     awakeHours: 0,              // Tired after 30 gh awake (plan §A3)
     canCharges: PS.canCapacity, // watering can pours left
     canWater: 'tap',            // water source the can was filled from
@@ -149,6 +153,8 @@ export function stepPlayer(state, inp, dt) {
   inp.interactPressed = false;
   const reload = !!inp.reloadPressed;
   inp.reloadPressed = false;
+  const clone = !!inp.clonePressed;
+  inp.clonePressed = false;
   if (inp.hotbar !== undefined && inp.hotbar !== null && inp.hotbar !== -1) {
     selectHotbar(state, inp.hotbar);
     inp.hotbar = -1;
@@ -186,7 +192,7 @@ export function stepPlayer(state, inp, dt) {
     if (jump) p.vy = -Ph.jumpVel;
     p.vx = dir * speed;
   } else {
-    if (jump && p.onGround) { p.vy = -Ph.jumpVel; p.onGround = false; }
+    if (jump && p.onGround) { p.vy = -Ph.jumpVel; p.onGround = false; state.events.push({ type: 'action', name: 'jump' }); }
     if (inp.down && p.onGround) p.dropT = C.dropThroughS; // S: drop through platforms
     if (p.dropT > 0) p.dropT -= dt;
     p.vy += Ph.gravity * dt;
@@ -212,6 +218,7 @@ export function stepPlayer(state, inp, dt) {
     trySecondary(state, p, place, inp);
   }
   if (interact) handleInteract(state);
+  if (clone) tryClone(state, p, inp);
   return p;
 }
 
@@ -283,10 +290,21 @@ function completeAction(state, a) {
     }
     case 'plant': {
       if (!pot || pot.plantId) return;
-      if ((state.player.inv.seeds || 0) <= 0) return;
-      state.player.inv.seeds--;
-      plants.plantSeed(state, pot, 'ditch');
+      const what = plants.plantable(state.player);
+      if (!what) return;
+      if (what.cutting) {
+        plants.plantCutting(state, pot);
+      } else {
+        state.player.inv[CONFIG.strains[what.strainKey].item]--;
+        plants.plantSeed(state, pot, what.strainKey);
+      }
       state.events.push({ type: 'action', name: 'plant' });
+      break;
+    }
+    case 'clone': {
+      if (!plant || !plants.canCut(plant)) return;
+      plants.takeCutting(state, plant);
+      state.events.push({ type: 'action', name: 'snip' });
       break;
     }
     case 'harvest': {
@@ -317,6 +335,17 @@ function completeAction(state, a) {
       break;
     }
   }
+}
+
+/** C: cut a clone from the aimed vegetative plant (plan §A10). */
+function tryClone(state, p, inp) {
+  const plant = plants.plantByPot(state, aimedPot(state, inp));
+  if (!plant || p.action) return;
+  if (!plants.canCut(plant)) {
+    state.events.push({ type: 'toast', msg: 'Cuttings come from vegetative plants.' });
+    return;
+  }
+  startAction(state, p, 'clone', CONFIG.genetics.cloneSeconds, { pot: null, plant });
 }
 
 /** Left click: tend the aimed plant if a tending tool is selected. Digging is
@@ -413,6 +442,7 @@ function updateDig(state, p, inp, dt) {
       const key = itemKeyFor(drop);
       if (key) p.inv[key]++;
     }
+    state.events.push({ type: 'action', name: 'dig' });
     resetDig(p);
   }
 }
@@ -574,7 +604,7 @@ export function interactHint(state) {
     case 'potDead': return 'E: Rip out the dead plant';
     case 'harvest': return 'E: Harvest (2 s)';
     case 'growing': return null; // inspecting is hover-based
-    case 'emptyPot': return inv.seeds > 0 ? 'E: Plant a seed (1 s)' : 'E: Pick up the pot';
+    case 'emptyPot': return plants.plantable(state.player) ? 'E: Plant a seed (1 s)' : 'E: Pick up the pot';
     case 'rack': {
       const wet = state.product.some((b) => b.where === 'inv' && b.wet);
       const dry = state.product.some((b) => b.where === t.obj.id && !b.wet);
@@ -631,7 +661,7 @@ export function handleInteract(state) {
       startAction(state, p, 'harvest', PS.actionSeconds.harvest, { pot: obj, plant: t.plant });
       break;
     case 'emptyPot':
-      if (p.inv.seeds > 0) {
+      if (plants.plantable(p)) {
         startAction(state, p, 'plant', PS.actionSeconds.plant, { pot: obj });
       } else {
         // Pick up the empty pot (plan §A2: E picks up pots).

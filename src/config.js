@@ -257,22 +257,50 @@ export const CONFIG = {
     logMax: 60,
   },
 
-  // Grower mastery constants (plan §A10). mastery.js itself is M7; the harvest
-  // formula already references the player level, so the per-level deltas live
-  // here now. Level stays 1 throughout M2.
+  // Grower mastery (plan §A10): XP per harvest, level table, perks, journal.
   mastery: {
     yieldPerLevel: 0.03,   // +3% yield per level above 1
     qualityPerLevel: 2,    // +2 quality per level above 1
     tendingPerLevel: 0.04, // -4% tending time per level above 1
+    xpBase: 0.5,           // XP = dry grams x (xpBase + quality/100)
+    levelXp: [0, 100, 250, 500, 900, 1500, 2300, 3400, 4800, 6500], // total XP for L1..L10
+    // Perks by the level that grants them.
+    perks: {
+      3: 'Exact moisture without a meter; Blue Haze seeds',
+      5: 'Exact hours-to-ripe without a loupe; Widow Kush seeds; license inspection eligible',
+      6: 'Breeding unlocked',
+      7: 'Clones always root',
+      9: 'Ripe window 36 gh',
+      10: 'Stress damage -20%',
+    },
+    exactMoistureLevel: 3, exactRipeLevel: 5, cloneRootLevel: 7, ripeWindowLevel: 9, stressLevel: 10,
+    ripeWindowGh: 36,      // L9 perk (base 24 in plants.ripeWindowGh)
+    stressDamageMult: 0.8, // L10 perk
+    cloneRootChance: 0.85, // below L7
+    journalMax: 20,        // harvests kept in the grower's journal
   },
 
   // Strains (plan §A4). Shop seeds roll ±seedVariance per trait at purchase;
   // the starting seeds are the exact base strain so an ideally tended plant
   // hits the M2 test window (38-41 g, quality 38-42) for every seed.
+  // `item` is the inventory key of the strain's seeds; `unlock` is the plan's
+  // rule: {day} or {level} (either one), {level} only for Widow Kush.
   strains: {
-    ditch: { name: 'Ditch Weed', Y: 25, P: 40, R: 80, S: 80, price: 20 },
+    ditch: { name: 'Ditch Weed', Y: 25, P: 40, R: 80, S: 80, price: 20, item: 'seeds' },
+    blue: { name: 'Blue Haze', Y: 50, P: 60, R: 60, S: 60, item: 'seeds_blue', unlock: { day: 8, level: 3 } },
+    widow: { name: 'Widow Kush', Y: 75, P: 80, R: 40, S: 20, item: 'seeds_widow', unlock: { level: 5 } },
   },
-  genetics: { seedVariance: 3 },
+  // Clones (plan §A10 Clone generations) and seed variance.
+  genetics: {
+    seedVariance: 3,
+    cloneUpChance: 0.6,    // +1 with 0.6 x mother's care
+    cloneDownChance: 0.4,  // else -1 with 0.4 x (1 - care)
+    cloneCap: 15,          // max gain over the strain's base per trait via cloning
+    cloneSeconds: 1.5,     // the cut takes 1.5 s
+    cloneMotherDamage: 5,  // mother loses 5 health
+    cloneStartProgress: 0.15, // cutting skips the seedling stage
+    traitMax: 100,
+  },
 
   // Grow sim numbers (plan §A4).
   plants: {
@@ -339,7 +367,7 @@ export const CONFIG = {
     alley:    { building: 'alley',    label: 'Moss (alley)',   open: 21, close: 4 },
     alleyGunMarkup: 0.5,                  // unregistered guns cost +50%
     prices: {
-      seeds: 20, pot: 10, soil_potting: 15, soil_living: 40,
+      seeds: 20, seeds_blue: 60, seeds_widow: 150, pot: 10, soil_potting: 15, soil_living: 40,
       nutrients: 20, phkit: 10,
       moisture_meter: 30, ph_meter: 60, loupe: 25, rack: 50,
       neem: 15, lamp_cfl: 80, lamp_hps: 300, lamp_led: 700, drip: 400,
@@ -361,7 +389,7 @@ export const CONFIG = {
     // carried (their effects arrive with the milestones that own them);
     // `unreg` marks alley guns.
     stock: {
-      hardware: ['seeds', 'pot', 'soil_potting', 'soil_living', 'nutrients', 'phkit',
+      hardware: ['seeds', 'seeds_blue', 'seeds_widow', 'pot', 'soil_potting', 'soil_living', 'nutrients', 'phkit',
         'moisture_meter', 'ph_meter', 'loupe', 'rack', 'neem', 'lamp_cfl', 'lamp_hps',
         'lamp_led', 'drip', 'filter', 'generator', 'wood', 'concrete_tile',
         'ladder', 'door', 'padlock', 'deadbolt', 'steeldoor', 'hatch', 'stash', 'tripwire', 'floodlight', 'camera',
@@ -547,7 +575,7 @@ export const CONFIG = {
 
   // Inventory items (display names for HUD/hotbar/menus).
   itemNames: {
-    can: 'Watering can', seeds: 'Ditch Weed seeds', pot: 'Pot',
+    can: 'Watering can', seeds: 'Ditch Weed seeds', seeds_blue: 'Blue Haze seeds', seeds_widow: 'Widow Kush seeds', pot: 'Pot',
     soil_potting: 'Potting soil', soil_living: 'Living soil',
     nutrients: 'Nutrients', phkit: 'pH kit',
     moisture_meter: 'Moisture meter', ph_meter: 'pH meter', loupe: 'Loupe',
@@ -624,6 +652,51 @@ export const CONFIG = {
       nutrients: '#e0c04a',
       stress: '#e6194b',
       barW: 14, barH: 2, barGap: 3,
+    },
+  },
+
+  // Audio (plan §B8/§C2): 100% synthesized. Each SFX is a parameter object:
+  // wave (sine|square|saw|tri), start/end Hz, length (s, under 0.5), attack (s),
+  // noise (0-1 share of white noise), vol, optional mod = amplitude wobble Hz.
+  audio: {
+    master: 0.7, sfxVol: 0.8, musicVol: 0.35, maxVoices: 6,
+    sampleRate: 22050,
+    footstepPx: 22,        // one footstep per this much walking
+    falloffPx: 500,        // SFX fade out (and pan) with distance from the camera centre
+    storageKey: 'backforty.audio',
+    sfx: {
+      footstep:  { wave: 'tri',    f0: 90,   f1: 50,   len: 0.08, attack: 0.002, noise: 0.5,  vol: 0.25 },
+      jump:      { wave: 'sine',   f0: 200,  f1: 420,  len: 0.14, attack: 0.005, noise: 0,    vol: 0.3 },
+      dig:       { wave: 'tri',    f0: 120,  f1: 60,   len: 0.15, attack: 0.002, noise: 0.7,  vol: 0.4 },
+      place:     { wave: 'square', f0: 220,  f1: 140,  len: 0.1,  attack: 0.002, noise: 0.2,  vol: 0.3 },
+      pour:      { wave: 'sine',   f0: 600,  f1: 900,  len: 0.35, attack: 0.03,  noise: 0.8,  vol: 0.3, mod: 24 },
+      feed:      { wave: 'sine',   f0: 500,  f1: 300,  len: 0.2,  attack: 0.01,  noise: 0.4,  vol: 0.3, mod: 14 },
+      snip:      { wave: 'saw',    f0: 2400, f1: 1600, len: 0.07, attack: 0.001, noise: 0.5,  vol: 0.3 },
+      harvest:   { wave: 'tri',    f0: 330,  f1: 520,  len: 0.3,  attack: 0.01,  noise: 0.3,  vol: 0.4 },
+      cash:      { wave: 'square', f0: 1200, f1: 1800, len: 0.25, attack: 0.002, noise: 0,    vol: 0.25, mod: 18 },
+      door:      { wave: 'saw',    f0: 110,  f1: 70,   len: 0.3,  attack: 0.01,  noise: 0.3,  vol: 0.35 },
+      lockpick:  { wave: 'square', f0: 1800, f1: 1500, len: 0.2,  attack: 0.001, noise: 0.2,  vol: 0.25, mod: 30 },
+      alarm:     { wave: 'square', f0: 900,  f1: 900,  len: 0.45, attack: 0.005, noise: 0,    vol: 0.3, mod: 8 },
+      bark:      { wave: 'saw',    f0: 420,  f1: 220,  len: 0.2,  attack: 0.005, noise: 0.25, vol: 0.4 },
+      bite:      { wave: 'saw',    f0: 300,  f1: 120,  len: 0.18, attack: 0.002, noise: 0.5,  vol: 0.4 },
+      batSwing:  { wave: 'sine',   f0: 500,  f1: 150,  len: 0.18, attack: 0.02,  noise: 0.6,  vol: 0.3 },
+      batHit:    { wave: 'tri',    f0: 180,  f1: 60,   len: 0.15, attack: 0.001, noise: 0.5,  vol: 0.5 },
+      gunshot1:  { wave: 'saw',    f0: 400,  f1: 80,   len: 0.22, attack: 0.001, noise: 0.7,  vol: 0.5 },
+      gunshot2:  { wave: 'saw',    f0: 250,  f1: 40,   len: 0.4,  attack: 0.001, noise: 0.85, vol: 0.6 },
+      gunshot3:  { wave: 'saw',    f0: 600,  f1: 60,   len: 0.35, attack: 0.001, noise: 0.6,  vol: 0.6 },
+      reload:    { wave: 'square', f0: 700,  f1: 400,  len: 0.12, attack: 0.001, noise: 0.3,  vol: 0.3 },
+      hurt:      { wave: 'saw',    f0: 260,  f1: 110,  len: 0.25, attack: 0.005, noise: 0.2,  vol: 0.45 },
+      phoneBuzz: { wave: 'square', f0: 180,  f1: 180,  len: 0.4,  attack: 0.005, noise: 0,    vol: 0.25, mod: 26 },
+      siren:     { wave: 'sine',   f0: 600,  f1: 1100, len: 0.5,  attack: 0.05,  noise: 0,    vol: 0.3 },
+      levelUp:   { wave: 'tri',    f0: 440,  f1: 880,  len: 0.45, attack: 0.01,  noise: 0,    vol: 0.4, mod: 10 },
+    },
+    // Music: two ambient beds (two detuned oscillators -> low-pass, a slow
+    // 8-note pentatonic walk, semitones above `root`) and a pulse-bass tension layer.
+    music: {
+      day:   { root: 220, notes: [0, 2, 4, 7, 9, 7, 4, 2],   detuneCents: 7, cutoff: 1400, noteSec: 1.6, wave: 'sine', vol: 0.5 },
+      night: { root: 110, notes: [0, 3, 5, 7, 10, 7, 5, 3],  detuneCents: 9, cutoff: 700,  noteSec: 2.2, wave: 'tri',  vol: 0.5 },
+      tension: { freq: 55, beatSec: 0.5, wave: 'square', cutoff: 300, vol: 0.5 },
+      fadeSec: 3, lookaheadSec: 3, tickMs: 1000,
     },
   },
 

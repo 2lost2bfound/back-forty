@@ -510,7 +510,7 @@ export function plantFrameName(plant) {
   if (plant.dead) return 'dead';
   const P = CONFIG.plants;
   if (plant.progress >= 1) {
-    if (plant.overHours < P.ripeWindowGh) return 'ripe';
+    if (plant.overHours < (plant.ripeWindowGh || P.ripeWindowGh)) return 'ripe';
     return 'over';
   }
   if (plant.progress >= P.stageProgress.flower) return 'flowering';
