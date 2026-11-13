@@ -48,3 +48,16 @@ export function createRng(seed) {
 
   return rng;
 }
+
+/**
+ * Run one operation on the save's PRNG: the state is loaded from save.rngState
+ * and written back afterwards, so every RNG-consuming operation is
+ * deterministic and replayable (plan §B3). Tests and tools/balance.js replay
+ * a whole run by storing rngState between steps.
+ */
+export function withStateRng(save, fn) {
+  const rng = createRng(save.rngState);
+  const out = fn(rng);
+  save.rngState = rng.state;
+  return out;
+}

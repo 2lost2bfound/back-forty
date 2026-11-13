@@ -5,7 +5,10 @@
 // at draw time). Browser-only module (needs document).
 
 import { CONFIG } from '../config.js';
-import { PALETTE, TILES, PLAYER_FRAMES, PLAYER_W, PLAYER_H } from './spritedata.js';
+import {
+  PALETTE, TILES, PLAYER_FRAMES, PLAYER_W, PLAYER_H,
+  PLANT_FRAMES, PLANT_W, PLANT_H, OBJECTS, OBJECT_W, OBJECT_H,
+} from './spritedata.js';
 
 function paint(ctx, ox, oy, rows) {
   for (let y = 0; y < rows.length; y++) {
@@ -50,6 +53,12 @@ export function buildAtlas() {
   for (const [name, rows] of Object.entries(PLAYER_FRAMES)) {
     put('player_' + name, PLAYER_W, PLAYER_H, rows);       // right facing
     put('player_' + name + 'L', PLAYER_W, PLAYER_H, mirror(rows)); // left facing
+  }
+  for (const [name, rows] of Object.entries(PLANT_FRAMES)) {
+    put('plant_' + name, PLANT_W, PLANT_H, rows);
+  }
+  for (const [name, rows] of Object.entries(OBJECTS)) {
+    put('obj_' + name, OBJECT_W, OBJECT_H, rows);
   }
 
   return { canvas, rects };

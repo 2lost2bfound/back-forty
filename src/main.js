@@ -1,26 +1,39 @@
-// main.js — boot, fixed-step loop, perf overlay (plan §B9).
-// Loop shape follows plan §B3: clamped dt, 60 Hz fixed physics, 2 Hz sim tick.
-// The frame loop allocates nothing: input is a reused object, the stress pool
-// is a preallocated Float32Array and the overlay writes to an existing DOM node.
+// main.js — boot, fixed-step loop, perf overlay, UI wiring (plan §B9).
+// Loop shape follows plan §B3: clamped dt, 60 Hz fixed physics, 2 Hz sim tick
+// (1 tick = 1/60 game hour), sleep runs the sim at 20x and stops physics.
+// stepSim order (plan §B3): time -> plants -> economy (heat/crew/threats/...
+// join as they are built). The frame loop allocates nothing: input is a
+// reused object, the stress pool is a preallocated Float32Array, DOM updates
+// happen at CONFIG.ui.updateHz with dirty checks.
 
 import { CONFIG } from './config.js';
 import { createRng } from './rng.js';
 import { initInput } from './ui/input.js';
 import { createRenderer } from './render/renderer.js';
-import { newGame } from './state.js';
-import { stepPlayer } from './entities/player.js';
+import { initHud } from './ui/hud.js';
+import { initMenus } from './ui/menus.js';
+import {
+  newGame, saveGame, loadGame, autosave, browserStorage, slotKey,
+} from './state.js';
+import { stepPlayer, aimedPot, assignHotbar, interactHint } from './entities/player.js';
+import { plantByPot } from './sim/plants.js';
+import { stepTime, sleepStart } from './sim/time.js';
+import { stepPlants } from './sim/plants.js';
+import { stepEconomy } from './sim/economy.js';
 import { T } from './world/tiles.js';
 
 // ---------------------------------------------------------------- boot ----
 
-const canvas = document.getElementById('game');
-const state = newGame(CONFIG.dev.seed);
+let state = newGame(CONFIG.dev.seed);
 state.paused = false;
 state.stressOn = false;
 state.overlayOn = false;
+state.altOn = false;
 
-const renderer = createRenderer(canvas);
-const input = initInput(canvas);
+const renderer = createRenderer(document.getElementById('game'));
+const input = initInput(document.getElementById('game'));
+const hud = initHud();
+const menus = initMenus(hud);
 
 const perfEl = document.getElementById('perf');
 const PHYS_DT = 1 / CONFIG.loop.physicsHz; // 1/60 s
@@ -31,8 +44,9 @@ const SIM_DT = 1 / CONFIG.loop.simHz;      // 0.5 s = 1/60 game hour
 const inp = {
   left: false, right: false, up: false, down: false,
   sprint: false, jumpPressed: false,
-  digHeld: false, placePressed: false,
+  digHeld: false, tendPressed: false, placePressed: false, interactPressed: false,
   aimX: 0, aimY: 0, select: 0,
+  hotbar: -1, wheel: 0, alt: false,
 };
 
 function readInput() {
@@ -43,35 +57,37 @@ function readInput() {
   inp.down = k.has('KeyS');
   inp.sprint = k.has('ShiftLeft') || k.has('ShiftRight');
   inp.jumpPressed = input.wasPressed('KeyW') || input.wasPressed('Space');
-  inp.digHeld = (input.mouse.buttons & 1) !== 0;       // left click: dig
-  inp.placePressed = input.wasButtonPressed(2);        // right click: place
+  inp.tendPressed = input.wasButtonPressed(0);         // left click: tend/dig start
+  inp.digHeld = (input.mouse.buttons & 1) !== 0;       // left held: dig
+  inp.placePressed = input.wasButtonPressed(2);        // right click: place / pH Up
+  inp.interactPressed = input.wasPressed('KeyE');
+  inp.alt = k.has('AltLeft') || k.has('AltRight');
   inp.aimX = input.mouse.x + renderer.cam.rx;          // mouse -> world cell
   inp.aimY = input.mouse.y + renderer.cam.ry;
-  inp.select = input.wasPressed('Digit1') ? T.DIRT
-    : input.wasPressed('Digit2') ? T.WOOD
-    : input.wasPressed('Digit3') ? T.LADDER
-    : 0;
+  inp.wheel = input.mouse.wheel;
+  inp.hotbar = -1;
+  for (let i = 0; i < 8; i++) {
+    if (input.wasPressed('Digit' + (i + 1))) inp.hotbar = i;
+  }
+  // M1 tile hotkeys (1/2/3 as tiles) are superseded by the 8-slot hotbar.
+  inp.select = 0;
 }
 
-// Preallocated stress-rectangle pool: [x, y, vx, vy] per rectangle.
-const stress = CONFIG.stress;
-const stressRects = new Float32Array(stress.rectangles * 4);
-const stressRng = createRng(CONFIG.dev.seed ^ 0x9e3779b9);
-for (let i = 0; i < stress.rectangles; i++) {
-  const j = i * 4;
-  stressRects[j] = stressRng.range(0, CONFIG.canvas.width);
-  stressRects[j + 1] = stressRng.range(0, CONFIG.canvas.height);
-  stressRects[j + 2] = stressRng.range(stress.speedMin, stress.speedMax) *
-    (stressRng.chance(0.5) ? 1 : -1);
-  stressRects[j + 3] = stressRng.range(stress.speedMin, stress.speedMax) *
-    (stressRng.chance(0.5) ? 1 : -1);
+/** Drop one-shot inputs while paused or sleeping so nothing queues up. */
+function flushOneShots() {
+  inp.jumpPressed = false;
+  inp.tendPressed = false;
+  inp.placePressed = false;
+  inp.interactPressed = false;
+  inp.hotbar = -1;
+  inp.wheel = 0;
+  inp.select = 0;
 }
 
 // ------------------------------------------------------------- update ----
 
-/** 60 Hz fixed step: player movement, dig/place actions. (§B3 stepPhysics) */
+/** 60 Hz fixed step: player movement, dig/place/tend actions. (§B3) */
 function stepPhysics(s, dt) {
-  readInput();
   stepPlayer(s, inp, dt);
   if (s.stressOn) updateStress(dt);
 }
@@ -96,10 +112,60 @@ function updateStress(dt) {
   }
 }
 
-/** 2 Hz fixed step: time, weather, plants, heat, economy, ... (§B3 stepSim).
- * M1 has no systems yet; the tick counter stays visible in tests/debug. */
-function stepSim(s, dt) {
+/** 2 Hz fixed step: time, plants, economy (§B3 order; more join per milestone). */
+function stepSim(s, dtReal) {
   s.simTicks++;
+  stepTime(s, dtReal);
+  stepPlants(s, dtReal / CONFIG.clock.secPerGh);
+  stepEconomy(s, dtReal / CONFIG.clock.secPerGh);
+}
+
+// ------------------------------------------------------------- events ----
+
+/** Consume the sim's event queue once per frame (plan §B3). */
+function processEvents() {
+  const evs = state.events.splice(0);
+  for (const ev of evs) {
+    switch (ev.type) {
+      case 'dawn': {
+        const r = autosave(state, browserStorage);
+        hud.toast(r && r.ok ? `Autosaved (dawn of day ${ev.day})` : 'Autosave failed');
+        break;
+      }
+      case 'sleep':
+        if (!state.sleeping) {
+          sleepStart(state);
+          hud.toast('Sleeping until 6:00...');
+        }
+        break;
+      case 'wake':
+        hud.toast('Good morning.');
+        break;
+      case 'harvest':
+        menus.queueReport(ev);
+        break;
+      case 'sale':
+        hud.toast(`Sold to ${ev.buyer}: +$${Math.round(ev.value)}`);
+        break;
+      case 'dried':
+        hud.toast('A batch finished drying.');
+        break;
+      case 'plantDied':
+        hud.toast(`Your ${ev.strainName} died (${ev.cause}).`);
+        break;
+      case 'toast':
+        hud.toast(ev.msg);
+        break;
+      case 'openShop':
+        menus.openShop(state);
+        break;
+      case 'openSell':
+        menus.openSell(state);
+        break;
+      default:
+        break; // 'action' sfx events are wired in M7
+    }
+  }
 }
 
 // -------------------------------------------------------------- frame ----
@@ -108,6 +174,8 @@ let last = performance.now();
 let physAcc = 0;
 let simAcc = 0;
 let lastDt = 0;
+let hoverInfo = null;
+let lastUi = performance.now();
 
 function frame(now) {
   const rawMs = now - last; // real frame delta, before the hidden-tab clamp
@@ -115,7 +183,13 @@ function frame(now) {
   last = now;
   lastDt = dt;
 
-  if (!state.paused) {
+  state.paused = menus.anyOpen();
+  readInput();
+
+  if (state.paused) {
+    flushOneShots();
+  } else if (!state.sleeping) {
+    state.altOn = inp.alt;
     physAcc += dt;
     let steps = 0;
     while (physAcc >= PHYS_DT) {
@@ -124,23 +198,48 @@ function frame(now) {
       if (++steps >= CONFIG.loop.maxPhysicsStepsPerFrame) { physAcc = 0; break; }
     }
     simAcc += dt;
-    steps = 0;
+    let simSteps = 0;
     while (simAcc >= SIM_DT) {
       stepSim(state, SIM_DT);
       simAcc -= SIM_DT;
-      if (++steps >= CONFIG.loop.maxSimStepsPerFrame) { simAcc = 0; break; }
+      if (++simSteps >= CONFIG.loop.maxSimStepsPerFrame) { simAcc = 0; break; }
+    }
+  } else {
+    // Sleeping: physics never runs (plan §B3); the sim catches up at 20x.
+    flushOneShots();
+    simAcc += dt * CONFIG.sleep.speed;
+    let simSteps = 0;
+    while (simAcc >= SIM_DT) {
+      stepSim(state, SIM_DT);
+      simAcc -= SIM_DT;
+      if (++simSteps >= CONFIG.loop.maxSimStepsPerFrame * CONFIG.sleep.speed) { simAcc = 0; break; }
     }
   }
 
+  updateHover();
   render();
 
-  // Dev toggles: F3 perf overlay, F4 stress scene (plan §A2 / §B2).
+  // Dev toggles and global keys (plan §A2 / §B2).
   if (input.wasPressed('F3')) {
     state.overlayOn = !state.overlayOn;
     perfEl.style.display = state.overlayOn ? 'block' : 'none';
   }
   if (input.wasPressed('F4')) {
     state.stressOn = !state.stressOn;
+  }
+  if (input.wasPressed('Escape') || input.wasPressed('KeyE')) {
+    if (menus.anyOpen()) menus.closeAll();
+    else if (input.wasPressed('Escape')) menus.openPause(state);
+  }
+  if (input.wasPressed('KeyI') && !menus.anyOpen()) menus.openInventory(state);
+
+  processEvents();
+
+  // HUD + hover panel at ui.updateHz (DOM, dirty-checked).
+  if (now - lastUi >= 1000 / CONFIG.ui.updateHz) {
+    lastUi = now;
+    hud.update(state, interactHint(state));
+    menus.tick(state, hoverInfo);
   }
 
   input.endFrame();
@@ -149,11 +248,51 @@ function frame(now) {
   requestAnimationFrame(frame);
 }
 
+function updateHover() {
+  const pot = aimedPot(state, inp);
+  hoverInfo = pot ? { pot, plant: plantByPot(state, pot) } : null;
+  state.hoverCell = pot ? { x: pot.x, y: pot.y } : null;
+}
+
 function render() {
   renderer.draw(state, state.paused ? 0 : lastDt);
   if (state.stressOn) {
     renderer.drawStressRects(stressRects, stress.rectangles);
   }
+}
+
+// ------------------------------------------------- save/load UI hooks ----
+
+window.addEventListener('backforty:assign', (e) => {
+  if (assignHotbar(state, state.player.hotbarIndex, e.detail.key)) {
+    hud.toast(`Assigned to slot ${state.player.hotbarIndex + 1}.`);
+  }
+});
+window.addEventListener('backforty:save', () => {
+  const r = saveGame(state, slotKey(1), browserStorage);
+  hud.toast(r.ok ? 'Saved.' : `Save failed: ${r.error}`);
+});
+window.addEventListener('backforty:load', () => {
+  const loaded = loadGame(slotKey(1), browserStorage);
+  if (!loaded) { hud.toast('Nothing to load.'); return; }
+  state = loaded;
+  menus.closeAll();
+  renderer.invalidate();
+  hud.toast('Loaded.');
+});
+
+// Preallocated stress-rectangle pool: [x, y, vx, vy] per rectangle.
+const stress = CONFIG.stress;
+const stressRects = new Float32Array(stress.rectangles * 4);
+const stressRng = createRng(CONFIG.dev.seed ^ 0x9e3779b9);
+for (let i = 0; i < stress.rectangles; i++) {
+  const j = i * 4;
+  stressRects[j] = stressRng.range(0, CONFIG.canvas.width);
+  stressRects[j + 1] = stressRng.range(0, CONFIG.canvas.height);
+  stressRects[j + 2] = stressRng.range(stress.speedMin, stress.speedMax) *
+    (stressRng.chance(0.5) ? 1 : -1);
+  stressRects[j + 3] = stressRng.range(stress.speedMin, stress.speedMax) *
+    (stressRng.chance(0.5) ? 1 : -1);
 }
 
 // ------------------------------------------------------ perf overlay ----
@@ -190,9 +329,9 @@ function updateOverlay(now, rawMs) {
   const ents = 1 + (state.stressOn ? stress.rectangles : 0);
   const text =
     `fps ${fps}  frame ${avg.toFixed(1)}ms avg / ${worst.toFixed(1)}ms max\n` +
-    `ents ${ents}  parts 0  dirty ${state.dirtyChunks.size}` +
-    `${state.stressOn ? '  STRESS (F4)' : ''}\n` +
-    `pos ${(p.x | 0)},${(p.y | 0)}  stam ${p.stamina | 0}  sel ${p.selected}`;
+    `ents ${ents}  plants ${state.plants.length}  parts 0  dirty ${state.dirtyChunks.size}` +
+    `${state.stressOn ? '  STRESS (F4)' : ''}${state.sleeping ? '  SLEEP x' + CONFIG.sleep.speed : ''}\n` +
+    `day ${state.time.day} ${state.time.hour.toFixed(2)}gh  cash $${Math.round(p.cash)}  pos ${(p.x | 0)},${(p.y | 0)}`;
   framesSince = 0;
   if (text !== lastText) {
     lastText = text;

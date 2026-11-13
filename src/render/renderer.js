@@ -1,7 +1,8 @@
 // renderer.js — camera, sky, parallax hills, tile chunks, entities (plan §B7).
-// Draw order per frame: sky -> hills -> tile chunks -> entities -> world-space
-// UI. The canvas is 800x450 internally, never resized; imageSmoothingEnabled
-// is false everywhere; camera positions are rounded to whole pixels.
+// Draw order per frame: sky -> hills -> tile chunks -> objects+plants ->
+// player -> night tint -> world-space UI (Alt bars, dig cell). The canvas is
+// 800x450 internally, never resized; imageSmoothingEnabled is false
+// everywhere; camera positions are rounded to whole pixels.
 //
 // Tile chunks: 25x4 = 100 offscreen 256x256 canvases (16x16 tiles each). A
 // tile edit marks its chunk dirty in state.dirtyChunks; at most
@@ -10,6 +11,9 @@
 import { CONFIG } from '../config.js';
 import { buildAtlas } from './sprites.js';
 import { tileInfo, getTile } from '../world/tiles.js';
+import { plantFrameName, PLANT_H } from './spritedata.js';
+import { drawNightTint } from './lighting.js';
+import { stageOf, stressorsOf } from '../sim/plants.js';
 
 const W = CONFIG.canvas.width;
 const H = CONFIG.canvas.height;
@@ -118,7 +122,7 @@ export function createRenderer(canvas) {
   }
 
   function playerFrameName(p) {
-    if (p.dig.cx >= 0) return 'tend';
+    if (p.action || p.dig.cx >= 0) return 'tend';
     if (!p.onGround && !p.onLadder) return 'jump';
     if (Math.abs(p.vx) > 1 && p.onGround) return 'walk' + (Math.floor(p.walkDist / 10) % 4);
     return 'idle';
@@ -132,6 +136,83 @@ export function createRenderer(canvas) {
     const sx = Math.round(p.x + p.w / 2 - PLAYER_HW - cam.rx);
     const sy = Math.round(p.y + p.h - PLAYER_HH - cam.ry);
     ctx.drawImage(atlas.canvas, r[0], r[1], r[2], r[3], sx, sy, r[2], r[3]);
+  }
+
+  // ------------------------------------------------- objects and plants ----
+
+  const OBJECT_SPRITES = { pot: 'obj_pot', rack: 'obj_rack', tap: 'obj_tap', barrel: 'obj_barrel', bed: 'obj_bed', skeet: 'obj_skeet' };
+  const plantById = (state, id) => (id ? state.plants.find((pl) => pl.id === id) || null : null);
+
+  /** Objects in view: pots (with their plant), racks, fixtures, markers. */
+  function drawObjectsAndPlants(state) {
+    const x0 = cam.rx - TS;
+    const x1 = cam.rx + W;
+    for (const o of state.objects) {
+      const px = o.x * TS;
+      if (px < x0 || px > x1) continue;
+      const py = o.y * TS - cam.ry;
+      const sx = px - cam.rx;
+      if (o.kind === 'pot') {
+        drawSprite('obj_pot', sx, py);
+        const plant = plantById(state, o.plantId);
+        if (plant) {
+          // 16x32 with the base ~12px into the pot cell.
+          drawSprite('plant_' + plantFrameName(plant), sx, py + 12 - PLANT_H);
+        }
+      } else {
+        drawSprite(OBJECT_SPRITES[o.kind], sx, py);
+        if (o.kind === 'rack') {
+          const n = state.product.reduce((s, b) => s + (b.where === o.id ? 1 : 0), 0);
+          if (n > 0) {
+            ctx.fillStyle = '#c9a23f';
+            ctx.fillRect(sx + 2, py + 3, Math.min(12, n * 3), 2);
+          }
+        }
+      }
+    }
+  }
+
+  function drawSprite(name, sx, sy) {
+    const r = atlas.rects[name];
+    if (!r || sy < -r[3] || sy > H || sx < -r[2] || sx > W) return;
+    ctx.drawImage(atlas.canvas, r[0], r[1], r[2], r[3], sx, sy, r[2], r[3]);
+  }
+
+  /** Hover highlight on the pot cell the player is inspecting. */
+  function drawHover(state) {
+    if (!state.hoverCell) return;
+    ctx.strokeStyle = 'rgba(255,255,255,0.7)';
+    ctx.strokeRect(state.hoverCell.x * TS - cam.rx + 0.5, state.hoverCell.y * TS - cam.ry + 0.5, TS - 1, TS - 1);
+  }
+
+  // --------------------------------------------------- world-space UI ------
+  // Alt overlay (My Addition 6): moisture/pH/nutrient bars + a stressor dot
+  // over every plant on screen. Three 2px bars, drawn only for visible plants.
+
+  function drawAltOverlay(state) {
+    if (!state.altOn) return;
+    const A = CONFIG.render.alt;
+    for (const plant of state.plants) {
+      const pot = state.objects.find((o) => o.id === plant.potId);
+      if (!pot) continue;
+      const sx = pot.x * TS - cam.rx;
+      if (sx < -TS || sx > W) continue;
+      const top = pot.y * TS + 12 - PLANT_H - cam.ry - 8;
+      bar(sx + 1, top, plant.moisture / 100, A.moisture, A);
+      bar(sx + 1, top + A.barGap + A.barH, (plant.ph - 4) / 4, A.ph, A); // pH 4.0-8.0
+      bar(sx + 1, top + 2 * (A.barGap + A.barH), plant.nutrients / 100, A.nutrients, A);
+      if (stageOf(plant) !== 'dead' && stressorsOf(plant).length > 0) {
+        ctx.fillStyle = A.stress;
+        ctx.fillRect(sx + 7, top - 3, 2, 2);
+      }
+    }
+  }
+
+  function bar(x, y, frac, color, A) {
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    ctx.fillRect(x - 1, y - 1, A.barW + 2, A.barH + 2);
+    ctx.fillStyle = color;
+    ctx.fillRect(x, y, Math.round(A.barW * Math.max(0, Math.min(1, frac))), A.barH);
   }
 
   // World-space UI (plan §B7 item 8, minimal in M1): the active dig cell and
@@ -154,6 +235,11 @@ export function createRenderer(canvas) {
     ctx,
     cam,
 
+    /** Force a full chunk repaint (after loading a save with different tiles). */
+    invalidate() {
+      chunksRendered = false;
+    },
+
     /** One full frame. */
     draw(state, dt) {
       if (!chunksRendered) renderAllChunks(state); // boot: paint the world once
@@ -162,8 +248,12 @@ export function createRenderer(canvas) {
       ctx.drawImage(sky, 0, 0, 1, H, 0, 0, W, H); // 1px gradient stretched
       drawHills();
       drawVisibleChunks(state);
+      drawObjectsAndPlants(state);
       drawPlayer(state);
       drawDig(state);
+      drawHover(state);
+      drawNightTint(ctx, state.time.hour); // flat night tint (M4: lights)
+      drawAltOverlay(state);
     },
 
     /**

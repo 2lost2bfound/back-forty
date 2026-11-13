@@ -6,6 +6,11 @@
 // across the road zone, then the shack and town buildings stamped from small
 // tile templates. The rng is only used for the surface variation, so two runs
 // with the same seed produce byte-identical grids.
+//
+// M2: also stamps the lot's starting objects (plan §A3): water tap + rain
+// barrel, the shack bed, 4 starting pots in the yard, and Skeet's marker at
+// the park. Objects are plain data in state.objects (pots are carryable, so
+// they live in the save rather than being re-derived).
 
 import { CONFIG } from '../config.js';
 import { createRng } from '../rng.js';
@@ -128,5 +133,22 @@ export function generateWorld(seed) {
     });
   }
 
-  return { grid, surface };
+  // 5. Starting objects (plan §A3 lot contents + §A7 Skeet, starting contact).
+  //    Yard west of the shack door (57): tap 41, barrel 42, pots 44-47.
+  const P = CONFIG.plants;
+  const objects = [];
+  let nextId = 1;
+  const add = (kind, x, extra) => {
+    objects.push({ id: nextId++, kind, x, y: surface[x] - 1, ...extra });
+  };
+  add('tap', 41);
+  add('barrel', 42, { charges: P.barrelStartCharges });
+  add('pot', 44, { soil: 'cheap', soilPh: P.freshSoilPh, plantId: null });
+  add('pot', 45, { soil: 'cheap', soilPh: P.freshSoilPh, plantId: null });
+  add('pot', 46, { soil: 'cheap', soilPh: P.freshSoilPh, plantId: null });
+  add('pot', 47, { soil: 'cheap', soilPh: P.freshSoilPh, plantId: null });
+  add('bed', 50);                                  // shack interior
+  add('skeet', CONFIG.economy.skeet.x);            // park marker (town)
+
+  return { grid, surface, objects, nextId };
 }
