@@ -13,9 +13,13 @@ case "$M" in
 esac
 MODEL="${MODEL_OVERRIDE:-$MODEL}"   # e.g. MODEL_OVERRIDE=opencode/big-pickle ./build.sh 3
 
+# rollback point: snapshot whatever is here before this milestone starts (tag the previous milestone if untagged)
+git add -A && { git commit -qm "Before M$M" || true; }
+[ "$M" -gt 0 ] && git tag "m$((M - 1))" 2>/dev/null || true
+
 echo ">>> Milestone M$M with $MODEL"
 opencode run -m "$MODEL" --auto --title "Back Forty M$M" \
   "Read plan.md. Build Milestone M$M only (the '### M$M —' section under DELIVERABLE 4 — BUILD ORDER), following every 'Rules for the builder' item and the architecture in DELIVERABLE 2. Earlier milestones are already built in this folder; extend them, do not rewrite them. When done, run 'node --test tests/' and fix failures until it is green. Do not start the next milestone. Finish with a short list of what is done and anything from the 'Done when' list you could not verify (e.g. the perf gate on the target machine)."
 
 echo ">>> Checking tests"
-node --test tests/ && echo ">>> M$M tests green" || { echo ">>> M$M tests FAILED — rerun with: MODEL_OVERRIDE=opencode/big-pickle ./build.sh $M"; exit 1; }
+node --test tests/ && { echo ">>> M$M tests green"; git add -A; git commit -qm "M$M built with $MODEL" || true; git tag -f "m$M" >/dev/null; } || { echo ">>> M$M tests FAILED — rerun with: MODEL_OVERRIDE=opencode/big-pickle ./build.sh $M"; exit 1; }
