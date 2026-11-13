@@ -96,6 +96,7 @@ function readInput() {
   if (input.wasPressed('KeyB')) inp.bikePressed = true;
   if (input.wasPressed('KeyR')) inp.reloadPressed = true;
   if (input.wasPressed('KeyC')) inp.clonePressed = true;
+  if (input.wasPressed('KeyQ')) inp.seedCyclePressed = true;
   if (input.wasPressed('KeyZ')) inp.useSub = 'crank';
   if (input.wasPressed('KeyX')) inp.useSub = 'blues';
   if (input.wasPressed('KeyV')) inp.useSub = 'weed';
@@ -120,6 +121,7 @@ function flushOneShots() {
   inp.bikePressed = false;
   inp.reloadPressed = false;
   inp.clonePressed = false;
+  inp.seedCyclePressed = false;
   inp.useSub = null;
   inp.hotbar = -1;
   inp.wheel = 0;
@@ -260,6 +262,9 @@ function processEvents() {
         break;
       case 'win':
         screens.openWin(state);
+        break;
+      case 'cupWin':
+        screens.openCup(ev.stats);
         break;
       case 'inspector':
         hud.toast('The license inspector is walking your lot.');
@@ -439,7 +444,12 @@ window.addEventListener('backforty:legacy', () => {
 const perf = createPerf();
 if (CONFIG.dev.exposeGlobals) {
   window.__perf = perf;                              // rolling + since-reset stats, perf.reset()
-  window.__dev = { stress: toggleStress, state: () => state };
+  window.__dev = {
+    stress: toggleStress, state: () => state,
+    // M11 test shortcuts: __dev.level(6) sets Grower level and XP; __dev.legacy() grants the license and enters Legacy mode.
+    level: (n) => { state.player.level = n; state.player.xp = CONFIG.mastery.levelXp[n - 1]; },
+    legacy: () => { state.license.granted = state.license.granted || { day: state.time.day }; state.won = state.won || { day: state.time.day }; state.legacy = true; },
+  };
 }
 let lastOverlay = performance.now();
 let framesSince = 0;

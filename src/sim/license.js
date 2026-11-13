@@ -8,8 +8,10 @@
 import { CONFIG } from '../config.js';
 import { hs, noteSpend } from './heat.js';
 import { shopOpen } from './economy.js';
+import { lineOf } from './genetics.js';
 
 const L = CONFIG.license;
+const CUP = CONFIG.cup;
 const nowGh = (s) => s.time.day * 24 + s.time.hour;
 
 export function initLicense() {
@@ -209,6 +211,58 @@ export function enterLegacy(state) {
   return true;
 }
 
+// ------------------------------------------------------ Harvest Cup -------
+// Legacy mode only (plan §A11): every 28 days the town judges the entries. A
+// named strain with trait sum 320+ at stability 1.0 wins. Entering costs 28 g
+// of the strain's dry bud; one entry at a time.
+
+export const cupOf = (state) => { const l = lic(state); return l.cup || (l.cup = { entry: null, wins: 0, last: null }); };
+
+/** The next judging day: a multiple of 28, today if it is not yet judging hour. */
+export function nextCupDay(state) {
+  const t = state.time;
+  let d = Math.ceil(t.day / CUP.everyDays) * CUP.everyDays;
+  if (d === t.day && t.hour >= CUP.judgeHour) d += CUP.everyDays;
+  return d;
+}
+
+/** Dry, named, bred bud in the pack that could be entered. */
+export function cupBatches(state) {
+  return state.product.filter((b) => b.where === 'inv' && !b.wet && b.grams >= CUP.grams && lineOf(state, b.lineId) && lineOf(state, b.lineId).name);
+}
+
+export const cupQualifies = (b) => b.sum >= CUP.sumMin && b.stab >= CUP.stability;
+
+export function enterCup(state, batch) {
+  const c = cupOf(state);
+  if (!state.legacy) return { ok: false, msg: 'The Harvest Cup is run in Legacy mode, after the license.' };
+  if (c.entry) return { ok: false, msg: 'You already have an entry in this year\'s Cup.' };
+  if (!shopOpen(state.time, 'townhall')) return { ok: false, msg: 'The town hall is closed.' };
+  if (!cupBatches(state).includes(batch)) return { ok: false, msg: `Enter ${CUP.grams} g of dry bud from a named strain.` };
+  batch.grams -= CUP.grams;
+  if (batch.grams <= 1e-6) state.product.splice(state.product.indexOf(batch), 1);
+  const line = lineOf(state, batch.lineId);
+  c.entry = { day: nextCupDay(state), lineId: line.id, name: line.name, sum: batch.sum, stab: batch.stab, quality: batch.quality };
+  return { ok: true, msg: `${line.name} is entered in the Harvest Cup (judged day ${c.entry.day}).` };
+}
+
+function judgeCup(state) {
+  const c = cupOf(state);
+  const e = c.entry;
+  if (!e || !state.legacy || nowGh(state) < e.day * 24 + CUP.judgeHour) return;
+  c.entry = null;
+  c.last = { ...e, won: cupQualifies(e) };
+  if (c.last.won) {
+    c.wins++;
+    state.events.push({ type: 'cupWin', stats: { day: state.time.day, name: e.name, sum: e.sum, quality: e.quality, wins: c.wins } });
+  } else {
+    const why = [];
+    if (e.sum < CUP.sumMin) why.push(`trait sum ${e.sum} (needs ${CUP.sumMin})`);
+    if (e.stab < CUP.stability) why.push(`stability ${Math.round(e.stab * 100)}% (needs 100%)`);
+    state.events.push({ type: 'notice', title: 'Harvest Cup', lines: [`${e.name} placed, but did not win: ${why.join(' and ')}.`, `The next Cup is in ${CUP.everyDays} days.`] });
+  }
+}
+
 /** 2 Hz license step (plan §B3: last in stepSim). */
 export function stepLicense(state) {
   const l = lic(state);
@@ -227,6 +281,7 @@ export function stepLicense(state) {
       state.events.push({ type: 'inspector' });
     } else if (l.inspecting && nowGh(state) >= l.inspecting.until) grant(state);
   }
+  judgeCup(state);
   stepWashed(state);
   checkLose(state);
 }

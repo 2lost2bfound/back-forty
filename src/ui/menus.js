@@ -8,14 +8,18 @@ import { stageOf, stressorsOf, avgHealthOf, careOf, litHoursToRipe } from '../si
 import { scannerView, heatTier, hs, payDebt } from '../sim/heat.js';
 import {
   shopStock, shopOpen, buyItem, orderOf, fillQuote, fillOrder, nowGh, payFee,
-  buyerLevel, buyerMult, BUYER_KEYS, carriedGrams, carryCap,
+  buyerLevel, buyerMult, BUYER_KEYS, carriedGrams, carryCap, sellSeedPacks, seedPackPrice,
 } from '../sim/economy.js';
 import { journalView, hasLevel } from '../sim/mastery.js';
 import { status as addStatus, useSubstance } from '../sim/addiction.js';
-import { baseGenome } from '../sim/genetics.js';
+import {
+  baseGenome, breedingUnlocked, linesOf, lineName, hypeOf, nameLine, seedGroups, sexKnown,
+} from '../sim/genetics.js';
+import { seedChoices } from '../sim/plants.js';
 import { refuseFee, payTribute, rv } from '../sim/threats.js';
 import {
   lic, licenseReqs, submitSample, applyLicense, launder, launderRoom, upgradeFront,
+  cupOf, cupBatches, cupQualifies, enterCup, nextCupDay,
 } from '../sim/license.js';
 import {
   boardCandidates, describe, hire, fire, giveBonus, bailOut, dockPay, threaten, toggleOutgoing, placeMarker, crewOf,
@@ -186,7 +190,7 @@ export function initMenus(hud) {
     const eco = state.economy;
     phonePanel.body.textContent = '';
     const tabs = el('div', 'menu-row phone-tabs', phonePanel.body);
-    for (const t of ['orders', 'contacts', 'ledger', 'heat', 'crew', 'allies', 'journal', 'status']) {
+    for (const t of ['orders', 'contacts', 'ledger', 'heat', 'crew', 'allies', 'journal', 'lines', 'status']) {
       const b = el('button', 'menu-btn', tabs, t === phoneTab ? `[${t}]` : t);
       b.onclick = () => { phoneTab = t; renderPhone(); };
     }
@@ -232,6 +236,8 @@ export function initMenus(hud) {
       renderAlliesTab(state);
     } else if (phoneTab === 'journal') {
       renderJournal(state);
+    } else if (phoneTab === 'lines') {
+      renderLines(state);
     } else if (phoneTab === 'status') {
       renderStatus(state);
     } else if (phoneTab === 'contacts') {
@@ -272,6 +278,37 @@ export function initMenus(hud) {
       col.title = `Day ${h.day} ${h.strainName}${h.generation ? ' G' + h.generation : ''}: ${h.grams.toFixed(1)} g, quality ${h.quality}`;
       el('div', 'journal-yield', col).style.height = `${Math.round(60 * h.grams / maxG)}px`;
       el('div', 'journal-quality', col).style.height = `${Math.round(60 * h.quality / 100)}px`;
+    }
+  }
+
+  /** Phone > Lines (plan §A11): breeding lineage, stability, naming, hype, the seed picker. */
+  function renderLines(state) {
+    const body = phonePanel.body;
+    const p = state.player;
+    if (!breedingUnlocked(state)) {
+      el('div', 'menu-note', body, `Breeding unlocks at Grower level ${CONFIG.mastery.breedingLevel} (you are level ${p.level}).`);
+      return;
+    }
+    el('div', 'menu-note', body,
+      `Pollen kit uses ${p.inv.pollenkit || 0} · pollen samples ${(p.pollen || []).length} · males show sacs at 55% (loupe: 40%). ` +
+      'E on a male collects pollen, C culls him; E on a flowering female applies it; harvest her for seeds. Q picks which seeds E plants.');
+    const cur = seedChoices(state).find((c) => c.sel === (p.seedSel || 'auto'));
+    el('div', 'menu-note', body, `Planting: ${cur ? cur.label : 'automatic'}`);
+    const lines = Object.values(linesOf(state));
+    if (lines.length === 0) el('div', 'menu-note', body, 'No lines yet. Cross a flowering female with pollen from a male and harvest her.');
+    for (const l of lines) {
+      const hype = hypeOf(l);
+      const row = el('div', 'menu-row', body,
+        `${lineName(l)} · best F${l.filial} · stability ${Math.round(l.stability * 100)}% · from ${l.founders.join(' x ')}` +
+        `${l.name ? ` · hype ${hype}` : ''}`);
+      for (const g of seedGroups(state).filter((x) => x.lineId === l.id)) {
+        el('div', 'menu-row', body, `  ${g.count} seeds, F${g.filial}, stability ${Math.round(g.stability * 100)}%, trait sum ~${g.avgSum}`);
+      }
+      if (!l.name && l.stability >= CONFIG.genetics.breeding.nameStability) {
+        const input = el('input', 'name-input', row);
+        input.type = 'text'; input.maxLength = CONFIG.genetics.breeding.nameMax; input.placeholder = 'Name this line';
+        el('button', 'menu-btn', row, 'Register').onclick = () => { hud.toast(nameLine(state, l.id, input.value).msg); renderPhone(); };
+      }
     }
   }
 
@@ -434,7 +471,11 @@ export function initMenus(hud) {
     const keys = Object.keys(inv).filter((k) => inv[k] > 0);
     const cuts = state.player.cuttings || [];
     if (cuts.length > 0) el('div', 'menu-note', invPanel.body, `Cuttings x${cuts.length} (C cuts one from a vegetative plant; E plants it first)`);
-    if (keys.length === 0 && cuts.length === 0) el('div', 'menu-note', invPanel.body, 'Empty.');
+    const bredGroups = seedGroups(state);
+    for (const g of bredGroups) {
+      el('div', 'menu-note', invPanel.body, `${lineName(linesOf(state)[g.lineId])} seeds x${g.count} (F${g.filial}, stability ${Math.round(g.stability * 100)}%, Q picks what E plants)`);
+    }
+    if (keys.length === 0 && cuts.length === 0 && bredGroups.length === 0) el('div', 'menu-note', invPanel.body, 'Empty.');
     for (const key of keys) {
       const row = el('div', 'menu-row', invPanel.body);
       const count = key === 'nutrients' || key === 'phkit' ? `${inv[key]} doses` : inv[key];
@@ -488,6 +529,31 @@ export function initMenus(hud) {
     const row = el('div', 'menu-row', shopPanel.body);
     el('button', 'menu-btn', row, 'Submit sample').onclick = () => { hud.toast(submitSample(state).msg); renderShop(); };
     el('button', 'menu-btn', row, 'Apply for the license').onclick = () => { hud.toast(applyLicense(state).msg); renderShop(); };
+    renderBreedingHall(state);
+  }
+
+  /** Dispensary counter (licensed: sell named seed packs) and the Harvest Cup (Legacy). */
+  function renderBreedingHall(state) {
+    const body = shopPanel.body;
+    const p = state.player;
+    if (lic(state).granted) {
+      el('div', 'menu-note', body, `Dispensary counter: named seed packs pay into the Bank, ${CONFIG.genetics.breeding.seedPacksPerDay} a day (sold today ${p.seedSoldDay === state.time.day ? p.seedSoldToday : 0}).`);
+      for (const l of Object.values(linesOf(state)).filter((x) => x.name)) {
+        const mine = (p.bredSeeds || []).filter((s) => s.lineId === l.id);
+        if (mine.length === 0) continue;
+        const row = el('div', 'menu-row', body, `${l.name}: ${mine.length} seeds, about $${Math.round(mine.reduce((n, s) => n + seedPackPrice(s), 0) / mine.length)} each`);
+        for (const n of [1, 10]) el('button', 'menu-btn', row, `Sell ${n}`).onclick = () => { hud.toast(sellSeedPacks(state, l.id, n).msg); renderShop(); };
+      }
+    }
+    if (state.legacy) {
+      const c = cupOf(state);
+      el('div', 'menu-note', body, `Harvest Cup: judged day ${c.entry ? c.entry.day : nextCupDay(state)} at ${CONFIG.cup.judgeHour}:00. Win with a named strain, trait sum ${CONFIG.cup.sumMin}+, stability 100%. Cups won: ${c.wins}.`);
+      if (c.entry) el('div', 'menu-row', body, `Entered: ${c.entry.name} (sum ${c.entry.sum}, stability ${Math.round(c.entry.stab * 100)}%)`);
+      else for (const b of cupBatches(state)) {
+        const row = el('div', 'menu-row', body, `${b.strainName}: ${b.grams.toFixed(0)} g, sum ${b.sum}, stability ${Math.round(b.stab * 100)}% ${cupQualifies(b) ? '(a winner)' : '(not good enough yet)'}`);
+        el('button', 'menu-btn', row, `Enter ${CONFIG.cup.grams} g`).onclick = () => { hud.toast(enterCup(state, b).msg); renderShop(); };
+      }
+    }
   }
 
   // ------------------------------------------------------ report card ----
@@ -528,12 +594,12 @@ export function initMenus(hud) {
     const plant = hover.plant;
     const inv = state.player.inv;
     const stage = stageOf(plant);
-    let key = `${plant.id}|${stage}|${Math.round(plant.moisture)}|${plant.ph.toFixed(2)}|${Math.round(plant.nutrients)}`;
+    let key = `${plant.id}|${sexKnown(state, plant)}|${!!plant.crossed}|${plant.accident}|${plant.strainName}|${stage}|${Math.round(plant.moisture)}|${plant.ph.toFixed(2)}|${Math.round(plant.nutrients)}`;
     if (key === lastHoverKey) return;
     lastHoverKey = key;
 
     hoverPanel.textContent = '';
-    el('div', 'plant-panel-title', hoverPanel, `${plant.strainName}${plant.generation ? ` · G${plant.generation}` : ''}`);
+    el('div', 'plant-panel-title', hoverPanel, `${plant.strainName}${plant.generation ? ` · G${plant.generation}` : ''}${plant.filial ? ` · F${plant.filial}` : ''}`);
     const base = baseGenome(plant.strainKey);
     for (const k of ['Y', 'P', 'R', 'S']) {
       const r = el('div', 'trait-row', hoverPanel, k);
@@ -560,6 +626,10 @@ export function initMenus(hud) {
         : h === 0 ? (stage === 'ripe' ? 'Ripe window: NOW' : `Overripe: ${Math.round(plant.overHours)} gh`)
         : `To ripe: ~${h.toFixed(1)} lit hours`);
     }
+    if (plant.filial) rows.push(`Line stability ${Math.round(plant.stability * 100)}%`);
+    if (sexKnown(state, plant)) rows.push('MALE: C culls him' + (plant.progress >= CONFIG.genetics.breeding.sacProgress ? ', E collects pollen' : ''));
+    if (plant.crossed) rows.push(`Crossed with ${plant.crossed.strainName}: seeds at harvest, bud x${CONFIG.genetics.breeding.crossYield}`);
+    else if (plant.accident) rows.push('A male pollinated her: yield x0.5, quality x0.6');
     const stressors = stressorsOf(plant);
     if (stressors.length > 0) rows.push(`Stress: ${stressors.join(', ')}`);
     for (const r of rows) el('div', 'plant-panel-row', hoverPanel, r);

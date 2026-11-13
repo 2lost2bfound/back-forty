@@ -15,12 +15,16 @@
 
 import { CONFIG } from '../config.js';
 import { T, tileAt } from '../world/tiles.js';
-import { baseGenome, cloneGenome, withGeneticsRng } from './genetics.js';
+import {
+  baseGenome, cloneGenome, withGeneticsRng, breedingUnlocked, lineOf, lineName, isMale, sacsShowing,
+  makeSeeds, traitSum, seedGroups,
+} from './genetics.js';
 import { addXp, recordHarvest, hasLevel, levelOf } from './mastery.js';
 import { isLitHour, isRaining } from './time.js';
 
 const P = CONFIG.plants;
 const L = CONFIG.lamps;
+const B = CONFIG.genetics.breeding;
 
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 
@@ -121,15 +125,21 @@ export function phUptake(plant) {
 export function createPlant(state, pot, strainKey, genome, opts = {}) {
   if (state.plants.length >= CONFIG.limits.plants) return null;
   const strain = CONFIG.strains[strainKey];
+  const line = lineOf(state, opts.lineId);
   const plant = {
     id: state.nextId++,
     potId: pot.id,
     strainKey,
-    strainName: strain.name,
+    strainName: line ? lineName(line) : strain.name,
     genome: genome || baseGenome(strainKey),
     lineId: opts.lineId ?? null,        // clone line (set at the first cut)
     generation: opts.generation || 0,   // clone generation: mother's + 1
-    sex: null,             // M11 (shop seeds never male)
+    sex: opts.sex || null,  // null = shop seed (female); 'f' | 'm' for bred seeds and their clones
+    stability: opts.stability || 0, // M11: this generation's line stability (0-1)
+    filial: opts.filial || 0,       // M11: F number inside the bred line
+    base: opts.base || null,        // M11: genome at birth (clone drift caps against it)
+    crossed: null,         // M11: pollen applied by hand {genome, lineId, ...}
+    accident: false,       // M11: a male's pollen reached her (yield x0.5, quality x0.6)
     progress: opts.progress || 0,       // 0..1 share of total lit hours
     overHours: 0,          // gh since 100% (ripe/overripe/rotten clock)
     moisture: P.startMoisture,
@@ -168,16 +178,61 @@ export function seedBagOf(player, strainKey) {
   return bags[strainKey] || (bags[strainKey] = []);
 }
 
+/** Key of a bred-seed group (same line and stability). */
+const bredKey = (sd) => `${sd.lineId}|${sd.stability}`;
+
 /**
- * What E plants into an empty pot: a cutting first, else seeds of the rarest
- * strain you carry (Widow Kush, Blue Haze, Ditch Weed). Null if nothing.
+ * What E plants into an empty pot. An explicit pick (Q, `player.seedSel`) wins;
+ * otherwise a cutting first, then bred seeds, then seeds of the rarest strain
+ * you carry (Widow Kush, Blue Haze, Ditch Weed). Null if nothing.
  */
 export function plantable(player) {
+  const bred = player.bredSeeds || [];
+  const sel = player.seedSel || 'auto';
+  if (sel.startsWith('bred:') && bred.some((sd) => bredKey(sd) === sel.slice(5))) return { bred: sel.slice(5) };
+  if (sel.startsWith('shop:') && (player.inv[CONFIG.strains[sel.slice(5)]?.item] || 0) > 0) return { strainKey: sel.slice(5) };
   if ((player.cuttings || []).length > 0) return { cutting: true };
+  if (bred.length > 0) return { bred: bredKey(bred[0]) };
   for (const key of ['widow', 'blue', 'ditch']) {
     if ((player.inv[CONFIG.strains[key].item] || 0) > 0) return { strainKey: key };
   }
   return null;
+}
+
+/** Everything Q can cycle through: auto, each shop strain in the pack, each bred seed group. */
+export function seedChoices(state) {
+  const p = state.player;
+  const out = [{ sel: 'auto', label: 'automatic (cutting, bred seeds, then rarest strain)' }];
+  for (const key of ['widow', 'blue', 'ditch']) {
+    const n = p.inv[CONFIG.strains[key].item] || 0;
+    if (n > 0) out.push({ sel: `shop:${key}`, label: `${CONFIG.strains[key].name} seeds x${n}` });
+  }
+  for (const g of seedGroups(state)) {
+    out.push({ sel: `bred:${g.key}`, label: `${lineName(lineOf(state, g.lineId))} F${g.filial} seeds x${g.count} (stability ${Math.round(g.stability * 100)}%)` });
+  }
+  return out;
+}
+
+/** Q: next seed type to plant. Returns the label chosen. */
+export function cycleSeedSel(state) {
+  const ch = seedChoices(state);
+  const i = ch.findIndex((c) => c.sel === (state.player.seedSel || 'auto'));
+  const next = ch[(i + 1) % ch.length];
+  state.player.seedSel = next.sel;
+  return next.label;
+}
+
+/** Plant one bred seed of a group (sex was rolled with the seed; it shows from 55%). */
+export function plantBred(state, pot, key) {
+  const bag = state.player.bredSeeds || [];
+  const i = bag.findIndex((sd) => bredKey(sd) === key);
+  if (i < 0 || pot.plantId) return null;
+  const sd = bag.splice(i, 1)[0];
+  const plant = createPlant(state, pot, sd.strainKey, sd.genome, {
+    lineId: sd.lineId, sex: sd.male ? 'm' : 'f', stability: sd.stability, filial: sd.filial, base: { ...sd.genome },
+  });
+  if (plant) pot.plantId = plant.id; else bag.splice(i, 0, sd);
+  return plant;
 }
 
 // ------------------------------------------------------------- clones -----
@@ -190,9 +245,12 @@ export function takeCutting(state, mother) {
   if (!canCut(mother)) return null;
   const G = CONFIG.genetics;
   if (mother.lineId == null) mother.lineId = state.nextId++;
-  const genome = withGeneticsRng(state, (rng) => cloneGenome(mother.genome, mother.strainKey, careOf(mother), rng));
+  const genome = withGeneticsRng(state, (rng) => cloneGenome(mother.genome, mother.strainKey, careOf(mother), rng, mother.base));
   mother.health = Math.max(1, mother.health - G.cloneMotherDamage);
-  const cutting = { strainKey: mother.strainKey, genome, lineId: mother.lineId, generation: mother.generation + 1 };
+  const cutting = {
+    strainKey: mother.strainKey, genome, lineId: mother.lineId, generation: mother.generation + 1,
+    sex: mother.sex, stability: mother.stability, filial: mother.filial, base: mother.base, // a clone keeps her sex and line
+  };
   const cuts = state.player.cuttings || (state.player.cuttings = []);
   cuts.push(cutting);
   return cutting;
@@ -208,6 +266,7 @@ export function plantCutting(state, pot) {
   }
   const plant = createPlant(state, pot, c.strainKey, c.genome, {
     progress: CONFIG.genetics.cloneStartProgress, lineId: c.lineId, generation: c.generation,
+    sex: c.sex, stability: c.stability, filial: c.filial, base: c.base,
   });
   if (plant) pot.plantId = plant.id;
   return plant;
@@ -341,6 +400,76 @@ export function stepPlants(state, gh) {
       }
     }
   }
+  stepPollination(state);
+}
+
+// --------------------------------------------------------- breeding -------
+
+/** Is this a female still in flower that pollen can reach? */
+const receptive = (plant) => !plant.dead && !isMale(plant) && stageOf(plant) === 'flowering';
+
+/**
+ * Accidental pollination (plan §A11): every flowering female within 6 tiles of
+ * an unculled male showing pollen sacs is pollinated (yield x0.5, quality x0.6).
+ * Deterministic: no random draws.
+ */
+function stepPollination(state) {
+  let males = null;
+  for (const pl of state.plants) if (!pl.dead && sacsShowing(pl)) (males || (males = [])).push(pl);
+  if (!males) return;
+  let hit = 0;
+  for (const f of state.plants) {
+    if (f.accident || f.crossed || !receptive(f)) continue;
+    const fp = potOf(state, f);
+    if (!fp) continue;
+    for (const m of males) {
+      const mp = potOf(state, m);
+      if (mp && Math.hypot(mp.x - fp.x, mp.y - fp.y) <= B.pollinateTiles) { f.accident = true; hit++; break; }
+    }
+  }
+  if (hit > 0) state.events.push({ type: 'toast', msg: `A male's pollen reached ${hit} plant${hit > 1 ? 's' : ''}: yield and quality will suffer. Cull males in time.` });
+}
+
+/** Collect pollen from a flowering male with a pollen kit (4 uses). */
+export function collectPollen(state, male) {
+  if (!breedingUnlocked(state)) return { ok: false, msg: 'Breeding unlocks at Grower level 6.' };
+  if (!male || male.dead || !sacsShowing(male)) return { ok: false, msg: 'No pollen sacs yet.' };
+  const inv = state.player.inv;
+  if ((inv.pollenkit || 0) <= 0) return { ok: false, msg: 'You need a pollen kit (hardware store).' };
+  inv.pollenkit--;
+  const bag = state.player.pollen || (state.player.pollen = []);
+  bag.push({
+    genome: { ...male.genome }, lineId: male.lineId, stability: male.stability, filial: male.filial,
+    strainKey: male.strainKey, strainName: male.strainName,
+  });
+  inv.pollen = bag.length;
+  return { ok: true, msg: `Collected pollen from the male ${male.strainName} (${inv.pollenkit} kit uses left).` };
+}
+
+/** Apply the oldest pollen sample to a flowering female: she will give bud x0.3 and seeds. */
+export function pollinateFemale(state, female) {
+  if (!breedingUnlocked(state)) return { ok: false, msg: 'Breeding unlocks at Grower level 6.' };
+  const bag = state.player.pollen || [];
+  if (bag.length === 0) return { ok: false, msg: 'You have no pollen.' };
+  if (!female || !receptive(female)) return { ok: false, msg: 'Only a flowering female can take pollen.' };
+  if (female.crossed) return { ok: false, msg: 'She has already been crossed.' };
+  female.crossed = bag.shift();
+  female.accident = false; // a deliberate cross replaces the accident
+  state.player.inv.pollen = bag.length;
+  return { ok: true, msg: `Crossed ${female.strainName} x ${female.crossed.strainName}. Harvest her for seeds.` };
+}
+
+/** Can the player cross this plant right now? (pollen in the pack, flowering female) */
+export const pollinatable = (state, plant) =>
+  breedingUnlocked(state) && (state.player.pollen || []).length > 0 && receptive(plant) && !plant.crossed;
+
+/** Pull out a male whose sex is known (C). */
+export function cullMale(state, male) {
+  const pot = potOf(state, male);
+  const i = state.plants.indexOf(male);
+  if (i >= 0) state.plants.splice(i, 1);
+  if (pot) pot.plantId = null;
+  state.events.push({ type: 'toast', msg: `Culled the male ${male.strainName}.` });
 }
 
 // -------------------------------------------------------------- tending ---
@@ -389,7 +518,7 @@ export function phAdjust(state, plant, dir) {
 
 /** Harvestable from 80% progress (early) through the windows, not rotten/dead. */
 export function canHarvest(plant) {
-  if (plant.dead) return false;
+  if (plant.dead || isMale(plant)) return false; // males give no bud: cull or collect pollen
   const stage = stageOf(plant);
   return plant.progress >= P.earlyHarvest.from && stage !== 'rotten';
 }
@@ -423,9 +552,12 @@ export function harvestPlant(state, plant) {
   const masteryMult = 1 + CONFIG.mastery.yieldPerLevel * (L - 1);
   const soilMult = P.soilYieldMult[pot ? pot.soil : 'cheap'] || 1;
 
-  const grams = base * healthMult * timingY * masteryMult * soilMult; // seeded x1 (no males in v1)
+  let grams = base * healthMult * timingY * masteryMult * soilMult; // seeded x1 (no males in v1)
   const careMult = 0.5 + 0.5 * careOf(plant);
-  const quality = clamp(g.P * careMult * timingQ + CONFIG.mastery.qualityPerLevel * (L - 1), 0, 100);
+  let quality = clamp(g.P * careMult * timingQ + CONFIG.mastery.qualityPerLevel * (L - 1), 0, 100);
+  const crossed = plant.crossed, accident = plant.accident && !crossed;
+  if (crossed) grams *= B.crossYield;       // seeded: bud at x0.3 plus seeds
+  if (accident) { grams *= B.accidentalYield; quality *= B.accidentalQuality; }
 
   const fmt = (v) => v.toFixed(2);
   const batch = grams > 0 ? {
@@ -434,11 +566,13 @@ export function harvestPlant(state, plant) {
     quality: Math.round(quality * 10) / 10,
     grams,
     wet: true,
+    ...(lineOf(state, plant.lineId) ? { lineId: plant.lineId, stab: plant.stability, sum: traitSum(g) } : {}),
     dryHoursLeft: P.dryHours,
     where: 'inv',
     rackId: null,
   } : null;
 
+  const seeds = crossed ? makeSeeds(state, plant, crossed, plant.health) : null;
   if (pot) pot.soilPh = plant.ph; // the soil keeps its pH for the next run
   const idx = state.plants.indexOf(plant);
   if (idx >= 0) state.plants.splice(idx, 1);
@@ -465,8 +599,15 @@ export function harvestPlant(state, plant) {
       `= ${grams.toFixed(1)} g wet`,
       `Quality: ${g.P} potency x ${fmt(careMult)} care x ${fmt(timingQ)} timing = ${quality.toFixed(1)}`,
       ...(vs ? [vs] : []),
+      ...(crossed ? [`Crossed with ${crossed.strainName}: bud x${B.crossYield}`] : []),
+      ...(accident ? [`A male pollinated her: yield x${B.accidentalYield}, quality x${B.accidentalQuality}`] : []),
     ] : ['The plant was rotten. Nothing usable came out.'],
+    seeds: seeds ? seeds.length : 0,
   });
+  if (seeds) {
+    const s0 = seeds[0];
+    state.events.push({ type: 'toast', msg: `${seeds.length} seeds: ${lineName(lineOf(state, s0.lineId))} F${s0.filial}, stability ${Math.round(s0.stability * 100)}%.` });
+  }
   if (batch) addXp(state, grams, quality);
   return batch;
 }

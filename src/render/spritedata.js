@@ -30,6 +30,7 @@ export const PALETTE = {
   x: '#11131a',                               // outline/eye
   // plants and objects (M2)
   i: '#c9a23f',                               // buds (ripe gold)
+  y: '#ece27a', Y: '#b8ab4a',                 // male pollen sacs (M11)
   z: '#6a5230',                               // dead/wilted stem
   a: '#8fd0e8', A: '#5aa8c8',                 // water (barrel/tap)
 };
@@ -492,6 +493,26 @@ const PLANT_DEAD = frame32([
   '.......z........',
 ]);
 
+// Male in flower (M11): thin leaves and hanging pollen sacs, no buds.
+const PLANT_MALE = frame32([
+  '..y..y..y..y....',
+  '.yYy.yYy.yYy....',
+  '..y.hyy.yh.y....',
+  '.gh.yYyyYy.hg...',
+  '..ggghyyhgggg...',
+  '...gGggggGgg....',
+  '....gggggg......',
+  '.....GggG.......',
+  '.....GggG.......',
+  '......gg........',
+  '......gg........',
+  '......gg........',
+  '.......g........',
+]);
+
+// Bred strains swap the leaf and bud colours (purple) so a line reads differently from shop seed.
+export const BRED_PALETTE = { g: '#6a4a9a', G: '#4a3070', h: '#8a6ac0', i: '#d878c8', z: '#5a4a60', N: '#4a3a50' };
+
 export const PLANT_W = 16;
 export const PLANT_H = 32;
 
@@ -503,12 +524,19 @@ export const PLANT_FRAMES = {
   ripe: PLANT_RIPE,
   over: PLANT_OVER,
   dead: PLANT_DEAD,
+  male: PLANT_MALE,
 };
 
 /** Frame name for a plant's growth state (renderer). */
 export function plantFrameName(plant) {
+  const name = baseFrameName(plant);
+  return plant.sex && !plant.dead ? 'b_' + name : name; // bred plants (sex set) use the bred palette
+}
+
+function baseFrameName(plant) {
   if (plant.dead) return 'dead';
   const P = CONFIG.plants;
+  if (plant.sex === 'm' && plant.progress >= CONFIG.genetics.breeding.sacProgress) return 'male';
   if (plant.progress >= 1) {
     if (plant.overHours < (plant.ripeWindowGh || P.ripeWindowGh)) return 'ripe';
     return 'over';

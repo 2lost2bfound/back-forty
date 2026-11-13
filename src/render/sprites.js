@@ -7,14 +7,14 @@
 import { CONFIG } from '../config.js';
 import {
   PALETTE, TILES, PLAYER_FRAMES, PLAYER_W, PLAYER_H,
-  PLANT_FRAMES, PLANT_W, PLANT_H, OBJECTS, OBJECT_W, OBJECT_H,
+  PLANT_FRAMES, PLANT_W, PLANT_H, BRED_PALETTE, OBJECTS, OBJECT_W, OBJECT_H,
 } from './spritedata.js';
 
-function paint(ctx, ox, oy, rows) {
+function paint(ctx, ox, oy, rows, pal = PALETTE) {
   for (let y = 0; y < rows.length; y++) {
     const row = rows[y];
     for (let x = 0; x < row.length; x++) {
-      const color = PALETTE[row[x]];
+      const color = pal[row[x]];
       if (color) {
         ctx.fillStyle = color;
         ctx.fillRect(ox + x, oy + y, 1, 1);
@@ -39,9 +39,9 @@ export function buildAtlas() {
   let cy = 0;
   let rowH = 0;
 
-  function put(name, w, h, rows) {
+  function put(name, w, h, rows, pal) {
     if (cx + w > size) { cx = 0; cy += rowH; rowH = 0; }
-    paint(ctx, cx, cy, rows);
+    paint(ctx, cx, cy, rows, pal);
     rects[name] = [cx, cy, w, h];
     cx += w;
     rowH = Math.max(rowH, h);
@@ -56,6 +56,10 @@ export function buildAtlas() {
   }
   for (const [name, rows] of Object.entries(PLANT_FRAMES)) {
     put('plant_' + name, PLANT_W, PLANT_H, rows);
+  }
+  const bredPal = { ...PALETTE, ...BRED_PALETTE };
+  for (const [name, rows] of Object.entries(PLANT_FRAMES)) {
+    put('plant_b_' + name, PLANT_W, PLANT_H, rows, bredPal);
   }
   for (const [name, rows] of Object.entries(OBJECTS)) {
     put('obj_' + name, OBJECT_W, OBJECT_H, rows);

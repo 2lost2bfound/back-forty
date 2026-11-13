@@ -23,6 +23,7 @@ import { CONFIG } from '../config.js';
 import { T, itemKeyFor, setTile, digInfo, digTile, canPlace, inBounds, isSolidId, tileAt } from '../world/tiles.js';
 import { moveBody, boxOverlapsId } from '../world/physics.js';
 import * as plants from '../sim/plants.js';
+import { sacsShowing, sexKnown } from '../sim/genetics.js';
 import * as economy from '../sim/economy.js';
 import { pedNear } from './npc.js';
 import { isWeapon, attack, startReload, useBandage } from './combat.js';
@@ -236,6 +237,10 @@ export function stepPlayer(state, inp, dt) {
   }
   if (interact) handleInteract(state);
   if (clone) tryClone(state, p, inp);
+  if (inp.seedCyclePressed) {
+    inp.seedCyclePressed = false;
+    state.events.push({ type: 'toast', msg: `Planting: ${plants.cycleSeedSel(state)}` });
+  }
   return p;
 }
 
@@ -313,6 +318,8 @@ function completeAction(state, a) {
       if (!what) return;
       if (what.cutting) {
         plants.plantCutting(state, pot);
+      } else if (what.bred) {
+        plants.plantBred(state, pot, what.bred);
       } else {
         state.player.inv[CONFIG.strains[what.strainKey].item]--;
         plants.plantSeed(state, pot, what.strainKey);
@@ -324,6 +331,20 @@ function completeAction(state, a) {
       if (!plant || !plants.canCut(plant)) return;
       plants.takeCutting(state, plant);
       state.events.push({ type: 'action', name: 'snip' });
+      break;
+    }
+    case 'collect': {
+      if (!plant) return;
+      const r = plants.collectPollen(state, plant);
+      state.events.push({ type: 'toast', msg: r.msg });
+      if (r.ok) state.events.push({ type: 'action', name: 'snip' });
+      break;
+    }
+    case 'pollinate': {
+      if (!plant) return;
+      const r = plants.pollinateFemale(state, plant);
+      state.events.push({ type: 'toast', msg: r.msg });
+      if (r.ok) state.events.push({ type: 'action', name: 'plant' });
       break;
     }
     case 'revive':
@@ -363,6 +384,7 @@ function completeAction(state, a) {
 function tryClone(state, p, inp) {
   const plant = plants.plantByPot(state, aimedPot(state, inp));
   if (!plant || p.action) return;
+  if (sexKnown(state, plant)) { plants.cullMale(state, plant); return; } // C on a known male pulls him out
   if (!plants.canCut(plant)) {
     state.events.push({ type: 'toast', msg: 'Cuttings come from vegetative plants.' });
     return;
@@ -579,6 +601,8 @@ export function interactTarget(state) {
     if (o.kind === 'pot') {
       const plant = plants.plantByPot(state, o);
       if (plant && plant.dead) consider({ kind: 'potDead', obj: o }, x, y);
+      else if (plant && sacsShowing(plant)) consider({ kind: 'male', obj: o, plant }, x, y);
+      else if (plant && plants.pollinatable(state, plant)) consider({ kind: 'pollinate', obj: o, plant }, x, y);
       else if (plant && plants.canHarvest(plant)) consider({ kind: 'harvest', obj: o, plant }, x, y);
       else if (plant) consider({ kind: 'growing', obj: o, plant }, x, y);
       else consider({ kind: 'emptyPot', obj: o }, x, y);
@@ -631,7 +655,9 @@ export function interactHint(state) {
     case 'potDead': return 'E: Rip out the dead plant';
     case 'harvest': return 'E: Harvest (2 s)';
     case 'growing': return null; // inspecting is hover-based
-    case 'emptyPot': return plants.plantable(state.player) ? 'E: Plant a seed (1 s)' : 'E: Pick up the pot';
+    case 'male': return inv.pollenkit > 0 ? `E: Collect pollen (${inv.pollenkit} uses) · C: cull him` : 'A flowering male: C pulls him out (pollen kit: hardware store)';
+    case 'pollinate': return `E: Apply pollen (${state.player.pollen.length}) · Q: pick seeds`;
+    case 'emptyPot': return plants.plantable(state.player) ? 'E: Plant a seed (1 s) · Q: pick seeds' : 'E: Pick up the pot';
     case 'rack': {
       const wet = state.product.some((b) => b.where === 'inv' && b.wet);
       const dry = state.product.some((b) => b.where === t.obj.id && !b.wet);
@@ -690,6 +716,13 @@ export function handleInteract(state) {
         break;
       }
       startAction(state, p, 'harvest', PS.actionSeconds.harvest, { pot: obj, plant: t.plant });
+      break;
+    case 'male':
+      if ((p.inv.pollenkit || 0) > 0) startAction(state, p, 'collect', CONFIG.genetics.breeding.collectSeconds, { pot: obj, plant: t.plant });
+      else state.events.push({ type: 'toast', msg: 'You need a pollen kit to collect pollen (hardware store, Grower L6). C culls him.' });
+      break;
+    case 'pollinate':
+      startAction(state, p, 'pollinate', CONFIG.genetics.breeding.pollinateSeconds, { pot: obj, plant: t.plant });
       break;
     case 'emptyPot':
       if (plants.plantable(p)) {

@@ -11,7 +11,7 @@
 
 import { CONFIG } from '../config.js';
 import { withStateRng } from '../rng.js';
-import { rollSeedGenome } from './genetics.js';
+import { rollSeedGenome, breedingUnlocked, lineOf, namedBonus, traitSum } from './genetics.js';
 import { seedBagOf } from './plants.js';
 import { strainUnlocked } from './mastery.js';
 import { canBuyDog, giveDog, dogHurt, healDog } from '../entities/dog.js';
@@ -44,7 +44,7 @@ export function shopOpen(time, shopKey) {
 
 /** A shop's stock in menu order: {key, name, price, service, unreg}. */
 export function shopStock(shopKey, state) {
-  return E.stock[shopKey].filter((key) => !state || !seedStrain(key) || strainUnlocked(state, seedStrain(key))).map((key) => {
+  return E.stock[shopKey].filter((key) => !state || ((!seedStrain(key) || strainUnlocked(state, seedStrain(key))) && (key !== 'pollenkit' || breedingUnlocked(state)))).map((key) => {
     const unreg = shopKey === 'alley' && E.unregStock.includes(key);
     const base = key === 'bribe' && state ? bribePrice(state) : E.prices[key];
     const mult = state ? priceMult(state, shopKey, key) : 1; // June's discount / markup, Rosa's taper price (M9)
@@ -80,6 +80,8 @@ function grantItem(state, key, shopKey) {
     inv.nutrients = (inv.nutrients || 0) + E.doses.nutrients;
   } else if (key === 'phkit') {
     inv.phkit = (inv.phkit || 0) + E.doses.phkit;
+  } else if (key === 'pollenkit') {
+    inv.pollenkit = (inv.pollenkit || 0) + E.doses.pollenkit;
   } else {
     inv[key] = (inv[key] || 0) + (E.packs[key] || 1);
   }
@@ -146,7 +148,7 @@ export function invBatches(state) {
 export function addProduct(state, batch) {
   if (!batch.wet) {
     const ex = state.product.find((b) =>
-      b.where === 'inv' && !b.wet && b.strainName === batch.strainName);
+      b.where === 'inv' && !b.wet && b.strainName === batch.strainName && b.sum === batch.sum && b.stab === batch.stab);
     if (ex) {
       const grams = ex.grams + batch.grams;
       ex.quality = Math.round(((ex.quality * ex.grams + batch.quality * batch.grams) / grams) * 10) / 10;
@@ -341,7 +343,7 @@ export function fillQuote(state, order, stock = fillStock(state, order)) {
   for (const b of stock) {
     const g = Math.min(left, b.grams);
     grams += g; left -= g;
-    value += g * pricePerGram(b) * mult;
+    value += g * pricePerGram(b) * mult * (1 + namedBonus(state, b, buyerLevel(state, order.buyer)));
     qsum += g * b.quality;
     if (left <= 0) break;
   }
@@ -372,6 +374,8 @@ export function fillOrder(state, orderId, opts = {}) {
   for (const b of stock) {
     const g = Math.min(left, b.grams);
     b.grams -= g; left -= g;
+    const line = lineOf(state, b.lineId);
+    if (line && line.name) line.hypeG = (line.hypeG || 0) + g; // hype: +1 per 100 g of the named strain sold
     if (b.grams <= 1e-6) state.product.splice(state.product.indexOf(b), 1);
     if (left <= 1e-9) break;
   }
@@ -556,3 +560,32 @@ export const carriedGrams = (state) =>
 
 export const carryCap = (state) =>
   state.player.inv.duffel > 0 ? E.carry.duffel : E.carry.backpack;
+
+// ------------------------------------------------------- seed packs -------
+
+/** Dispensary price of one seed: $50 x (Y+P+R+S)/200. */
+export const seedPackPrice = (seed) => CONFIG.genetics.breeding.seedPackBase * traitSum(seed.genome) / CONFIG.genetics.breeding.seedPackDivisor;
+
+/**
+ * Sell up to `n` seeds of a named line to the town-hall dispensary counter
+ * (licensed only, 10 a day). The sale is legal, so it pays into the Bank.
+ */
+export function sellSeedPacks(state, lineId, n = 1) {
+  const Bd = CONFIG.genetics.breeding;
+  const line = lineOf(state, lineId);
+  if (!state.license || !state.license.granted) return { ok: false, msg: 'The dispensary only buys from licensed growers.' };
+  if (!line || !line.name) return { ok: false, msg: 'Only named strains sell.' };
+  if (!shopOpen(state.time, 'townhall')) return { ok: false, msg: 'The town hall is closed.' };
+  const p = state.player;
+  if (p.seedSoldDay !== state.time.day) { p.seedSoldDay = state.time.day; p.seedSoldToday = 0; }
+  const room = Bd.seedPacksPerDay - p.seedSoldToday;
+  const bag = p.bredSeeds || [];
+  const mine = bag.filter((s) => s.lineId === lineId).sort((a, b) => traitSum(b.genome) - traitSum(a.genome));
+  const count = Math.min(n, room, mine.length);
+  if (count <= 0) return { ok: false, msg: room <= 0 ? 'The counter has bought its limit today.' : 'You have no seeds of that strain.' };
+  let value = 0;
+  for (const s of mine.slice(0, count)) { value += seedPackPrice(s); bag.splice(bag.indexOf(s), 1); }
+  p.seedSoldToday += count;
+  p.bank = (p.bank || 0) + value;
+  return { ok: true, count, value, msg: `Sold ${count} ${line.name} seeds for $${Math.round(value)} (to the Bank).` };
+}

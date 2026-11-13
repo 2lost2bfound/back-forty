@@ -357,3 +357,6 @@ body {
   color: #e8c46a; font: bold 11px monospace; text-shadow: 1px 1px 0 #000;
   white-space: pre; pointer-events: none;
 }
+
+/* M11: line-name box in the phone's Lines tab */
+.name-input { font: inherit; width: 140px; background: #1a2336; color: #e8eef8; border: 1px solid #3a4a68; padding: 2px 4px; }

@@ -12,16 +12,21 @@ export function initInput(canvas) {
   const gameKeys = new Set([
     'Space', 'Tab', 'AltLeft', 'AltRight', 'F3', 'F4',
     'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
-    'KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyE', 'KeyR', 'KeyI', 'KeyF', 'KeyB', 'KeyC',
+    'KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyE', 'KeyR', 'KeyI', 'KeyF', 'KeyB', 'KeyC', 'KeyQ',
   ]);
 
+  // Typing a line name in a text box must not fire game keys (E closes menus).
+  const typing = (e) => e.target && e.target.tagName === 'INPUT' && e.target.type === 'text' && e.code !== 'Escape';
+
   function onKeyDown(e) {
+    if (typing(e)) return;
     if (gameKeys.has(e.code)) e.preventDefault();
     if (!e.repeat) justPressed.add(e.code);
     keys.add(e.code);
   }
 
   function onKeyUp(e) {
+    if (typing(e)) return;
     keys.delete(e.code);
   }
 

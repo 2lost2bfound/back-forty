@@ -285,6 +285,7 @@ export const CONFIG = {
     ripeWindowGh: 36,      // L9 perk (base 24 in plants.ripeWindowGh)
     stressDamageMult: 0.8, // L10 perk
     cloneRootChance: 0.85, // below L7
+    breedingLevel: 6,      // L6 perk: breeding unlocked
     journalMax: 20,        // harvests kept in the grower's journal
   },
 
@@ -308,7 +309,28 @@ export const CONFIG = {
     cloneMotherDamage: 5,  // mother loses 5 health
     cloneStartProgress: 0.15, // cutting skips the seedling stage
     traitMax: 100,
+    // Breeding (plan §A11, M11).
+    breeding: {
+      maleChance: 0.5,        // bred seeds are 50% male (shop seeds never are)
+      sacProgress: 0.55,      // males show pollen sacs from 55% progress
+      loupeProgress: 0.40,    // ...but with a loupe you can tell from 40%
+      pollinateTiles: 6,      // an unculled male pollinates every flowering female within 6 tiles
+      accidentalYield: 0.5, accidentalQuality: 0.6, // the mistake's price
+      crossYield: 0.3,        // a crossed female gives bud at x0.3...
+      seedsBase: 6, seedsPerHealth: 20, // ...plus 6 + floor(health/20) seeds
+      noise: 8,               // child trait = lerp(mother, father, u) + noise in +-8 x (1 - stability)
+      f1Stability: 0.2, stabilityStep: 0.2, // new line 0.2; +0.2 per same-line generation
+      inbreedResilience: 2,   // each same-line generation: -2 Resilience
+      nameStability: 0.8, nameMax: 16,      // register a line at 0.8+; 16 characters
+      pollinateSeconds: 1.5, collectSeconds: 1.5,
+      // Selling the line.
+      namedTrust: 3, namedBonus: 0.15, hypeMaxBonus: 0.30, // trust 3+: +15%; up to +30% at hype 100
+      hypeGramsPer: 100, hypeMax: 100,                      // +1 hype per 100 g sold
+      seedPackBase: 50, seedPackDivisor: 200, seedPacksPerDay: 10, // $50 x (Y+P+R+S)/200 each, 10 a day
+    },
   },
+  // The Harvest Cup (Legacy mode, plan §A11/§A14): judged every 28 days.
+  cup: { everyDays: 28, judgeHour: 12, grams: 28, sumMin: 320, stability: 1 },
 
   // Grow sim numbers (plan §A4).
   plants: {
@@ -376,7 +398,7 @@ export const CONFIG = {
     alleyGunMarkup: 0.5,                  // unregistered guns cost +50%
     prices: {
       seeds: 20, seeds_blue: 60, seeds_widow: 150, pot: 10, soil_potting: 15, soil_living: 40,
-      nutrients: 20, phkit: 10,
+      nutrients: 20, phkit: 10, pollenkit: 150,
       moisture_meter: 30, ph_meter: 60, loupe: 25, rack: 50,
       neem: 15, lamp_cfl: 80, lamp_hps: 300, lamp_led: 700, drip: 400,
       filter: 200, generator: 900, wood: 2, concrete_tile: 5, ladder: 5,
@@ -391,7 +413,7 @@ export const CONFIG = {
       lawyer: 200, permit: 3000, bribe: 500,
       whiskey: 30, beer: 6, coffee: 4, bike_parts: 30,   // ally gifts (M9)
     },
-    doses: { nutrients: 10, phkit: 10 },  // a bottle/kit contains this many doses
+    doses: { nutrients: 10, phkit: 10, pollenkit: 4 },  // a bottle/kit contains this many doses
     // Items bought in packs: inventory units granted per purchase.
     packs: { ammo_22: 10, ammo_9: 10, ammo_shell: 5, ammo_rifle: 4 },
     // Stock per shop (menu order). `service` entries are paid for but not
@@ -399,7 +421,7 @@ export const CONFIG = {
     // `unreg` marks alley guns.
     stock: {
       hardware: ['seeds', 'seeds_blue', 'seeds_widow', 'pot', 'soil_potting', 'soil_living', 'nutrients', 'phkit',
-        'moisture_meter', 'ph_meter', 'loupe', 'rack', 'neem', 'lamp_cfl', 'lamp_hps',
+        'moisture_meter', 'ph_meter', 'loupe', 'rack', 'neem', 'pollenkit', 'lamp_cfl', 'lamp_hps',
         'lamp_led', 'drip', 'filter', 'generator', 'wood', 'concrete_tile',
         'ladder', 'door', 'padlock', 'deadbolt', 'steeldoor', 'hatch', 'stash', 'tripwire', 'floodlight', 'camera',
         'pickaxe', 'cart', 'bicycle', 'duffel', 'barrel_lock', 'coffee', 'bike_parts'],
@@ -586,7 +608,7 @@ export const CONFIG = {
   itemNames: {
     can: 'Watering can', seeds: 'Ditch Weed seeds', seeds_blue: 'Blue Haze seeds', seeds_widow: 'Widow Kush seeds', pot: 'Pot',
     soil_potting: 'Potting soil', soil_living: 'Living soil',
-    nutrients: 'Nutrients', phkit: 'pH kit',
+    nutrients: 'Nutrients', phkit: 'pH kit', pollenkit: 'Pollen kit', pollen: 'Pollen',
     moisture_meter: 'Moisture meter', ph_meter: 'pH meter', loupe: 'Loupe',
     rack: 'Drying rack', dirt: 'Dirt', wood: 'Wood', ladder: 'Ladder',
     pickaxe: 'Pickaxe',

@@ -53,7 +53,7 @@ export function initScreens() {
   const settings = loadSettings();
 
   const panels = {};
-  for (const k of ['title', 'pause', 'settings', 'win', 'export']) {
+  for (const k of ['title', 'pause', 'settings', 'win', 'cup', 'export']) {
     const panel = el('div', `menu-panel screen-${k}`, root);
     panel.style.display = 'none';
     panels[k] = { panel, title: el('div', 'menu-title', panel), body: el('div', 'menu-body', panel) };
@@ -166,6 +166,20 @@ export function initScreens() {
     show('win', 'YOU WIN');
   }
 
+  /** The Harvest Cup end screen (Legacy mode, plan §A11): its own win, then back to the farm. */
+  function openCup(c) {
+    const body = clear('cup');
+    el('div', 'menu-report-strain', body, `${c.name} wins the Harvest Cup!`);
+    for (const line of [
+      `Day ${c.day} · trait sum ${c.sum} at full stability · quality ${Math.round(c.quality)}`,
+      `Cups won: ${c.wins}. The next Cup is in 28 days.`,
+    ]) el('div', 'menu-report-line', body, line);
+    const row = el('div', 'menu-row', body);
+    button(row, 'Back to the farm', closeAll);
+    button(row, 'Title screen', () => fire('backforty:title'));
+    show('cup', 'HARVEST CUP');
+  }
+
   /** A failed save is never swallowed (plan §B4): say so and offer the file. */
   function openExportOffer(error, json) {
     const body = clear('export');
@@ -177,7 +191,7 @@ export function initScreens() {
   }
 
   return {
-    openTitle, openPause, openWin, openSettings, openExportOffer, closeAll,
+    openTitle, openPause, openWin, openCup, openSettings, openExportOffer, closeAll,
     anyOpen: () => open !== null,
     isOpen: (kind) => open === kind,
     tipsOn: () => settings.tips,
