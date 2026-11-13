@@ -7,6 +7,7 @@
 import { CONFIG } from '../config.js';
 import { nightAlpha } from '../sim/time.js';
 import { lampOn } from '../sim/plants.js';
+import { quality } from '../quality.js';
 
 const W = CONFIG.canvas.width;
 const H = CONFIG.canvas.height;
@@ -65,12 +66,12 @@ export function createLighting() {
       const p = state.player;
       const pcx = p.x + p.w / 2;
       const pcy = p.y + p.h / 2;
-      if (pcy > (state.surface[(pcx / TS) | 0] + 1) * TS) { // headlamp underground
+      if (quality.softLights && pcy > (state.surface[(pcx / TS) | 0] + 1) * TS) { // headlamp underground
         punch(pcx - cam.rx, pcy - cam.ry, LC.playerGlowTiles * TS);
         lights++;
       }
       for (const o of state.objects) {
-        if (lights >= CONFIG.limits.softLights) break;
+        if (lights >= CONFIG.limits.softLights || !quality.softLights) break; // step-down: flat tint
         if (o.kind !== 'lamp' || !lampOn(o, state.time.hour)) continue;
         const sx = o.x * TS + TS / 2 - cam.rx;
         const sy = o.y * TS + TS / 2 - cam.ry;

@@ -26,7 +26,7 @@ const ripe = (s, pot, strain = 'ditch') => {
 
 test('XP per harvest = grams x (0.5 + quality/100); levels follow the table', () => {
   assert.equal(xpForHarvest(40, 50), 40);
-  const xp = [0, 100, 250, 500, 900, 1500, 2300, 3400, 4800, 6500];
+  const xp = CONFIG.mastery.levelXp; // the table (retuned in M10)
   xp.forEach((x, i) => {
     assert.equal(levelFor(x), i + 1);
     if (x > 0) assert.equal(levelFor(x - 1), i);
@@ -34,7 +34,7 @@ test('XP per harvest = grams x (0.5 + quality/100); levels follow the table', ()
   const { s } = fresh();
   addXp(s, 100, 50); // 100 XP -> L2
   assert.equal(s.player.level, 2);
-  addXp(s, 1000, 50); // 1000 XP more -> past L5 (900 total at 1100)
+  addXp(s, xp[4] - 100, 50); // up to exactly the L5 threshold
   assert.equal(s.player.level, 5);
   const ups = s.events.filter((e) => e.type === 'levelUp').map((e) => e.level);
   assert.deepEqual(ups, [2, 3, 4, 5]);

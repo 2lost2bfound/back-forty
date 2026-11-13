@@ -19,6 +19,7 @@ import { initCrew } from './sim/crew.js';
 import { initGenetics } from './sim/genetics.js';
 import { initAddiction } from './sim/addiction.js';
 import { initAllies } from './sim/allies.js';
+import { initLicense } from './sim/license.js';
 
 export const SAVE_PREFIX = 'backforty';
 export const slotKey = (n) => `${SAVE_PREFIX}.slot${n}`;
@@ -29,7 +30,7 @@ export const autoKey = (n) => `${SAVE_PREFIX}.auto${n}`;
  * deterministic from the seed; the save's rngState carries the PRNG so tests,
  * the balance bot and replays are all reproducible (plan §B3).
  */
-export function newGame(seed) {
+export function newGame(seed, { difficulty = 'standard' } = {}) {
   const rng = createRng(seed);
   const world = generateWorld(seed);
   const px = CONFIG.world.spawnTileX * CONFIG.world.tile +
@@ -57,6 +58,11 @@ export function newGame(seed) {
     genetics: initGenetics(seed), // clone-drift PRNG stream (saved)
     addiction: initAddiction(seed), // dependence, buffs, recovery, own PRNG (saved)
     allies: initAllies(seed),   // friendship, favors, hospital/jail, own PRNG (saved)
+    license: initLicense(),     // front, laundering, application, rescue (saved)
+    difficulty,                 // relaxed | standard | harsh (saved)
+    won: null,                  // run stats once the license is granted (saved)
+    legacy: false,              // Legacy mode after the win (saved)
+    tipsSeen: {},               // first-time tips already shown (saved)
     entities: [],               // runtime: thieves/bikers
     bullets: [],                // runtime: the player's pooled bullets
     gameOver: null,             // { reason } once a lose condition fires
@@ -194,6 +200,11 @@ export function serializeState(state) {
     genetics: state.genetics,
     addiction: state.addiction,
     allies: state.allies,
+    license: state.license,
+    difficulty: state.difficulty,
+    won: state.won,
+    legacy: state.legacy,
+    tipsSeen: state.tipsSeen,
     gameOver: state.gameOver,
   });
 }
@@ -241,6 +252,11 @@ export function deserializeState(json) {
     genetics: o.genetics || initGenetics(o.seed),
     addiction: o.addiction || initAddiction(o.seed),
     allies: o.allies || initAllies(o.seed),
+    license: o.license || initLicense(),
+    difficulty: o.difficulty || 'standard',
+    won: o.won || null,
+    legacy: !!o.legacy,
+    tipsSeen: o.tipsSeen || {},
     entities: [],
     bullets: [],
     gameOver: o.gameOver || null,

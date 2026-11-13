@@ -1,5 +1,5 @@
 // menus.js — DOM menus over the canvas (plan §B7): shops, buyer order dialog,
-// phone (orders, contacts, ledger), inventory, pause (save/load), harvest report card and the
+// phone (orders, contacts, ledger), inventory, farm stand, harvest report card and the
 // hover plant panel. All full-screen menus pause the simulation (plan §A2);
 // main.js derives state.paused from anyOpen(). Browser-only module.
 
@@ -13,8 +13,10 @@ import {
 import { journalView, hasLevel } from '../sim/mastery.js';
 import { status as addStatus, useSubstance } from '../sim/addiction.js';
 import { baseGenome } from '../sim/genetics.js';
-import * as audio from '../audio/audio.js';
 import { refuseFee, payTribute, rv } from '../sim/threats.js';
+import {
+  lic, licenseReqs, submitSample, applyLicense, launder, launderRoom, upgradeFront,
+} from '../sim/license.js';
 import {
   boardCandidates, describe, hire, fire, giveBonus, bailOut, dockPay, threaten, toggleOutgoing, placeMarker, crewOf,
 } from '../sim/crew.js';
@@ -56,7 +58,7 @@ export function initMenus(hud) {
   const shopPanel = makePanel('shop');
   const sellPanel = makePanel('sell');
   const invPanel = makePanel('inventory');
-  const pausePanel = makePanel('pause');
+  const standPanel = makePanel('stand');
   const reportPanel = makePanel('report');
   const phonePanel = makePanel('phone');
   const noticePanel = makePanel('notice');
@@ -64,7 +66,7 @@ export function initMenus(hud) {
 
   function closeAll() {
     open = null;
-    for (const p of [shopPanel, sellPanel, invPanel, pausePanel, reportPanel, phonePanel, noticePanel, allyPanel]) {
+    for (const p of [shopPanel, sellPanel, invPanel, standPanel, reportPanel, phonePanel, noticePanel, allyPanel]) {
       p.panel.style.display = 'none';
     }
   }
@@ -95,12 +97,13 @@ export function initMenus(hud) {
       el('div', 'menu-note', shopPanel.body, `Closed. Open ${hrs(sh.open)}-${hrs(sh.close)}.`);
     }
     if (shopKey === 'bar') { renderBoard(state); renderDrinks(state); }
+    if (shopKey === 'townhall') renderLicense(state);
     for (const item of shopStock(shopKey, state)) {
       const row = el('div', 'menu-row', shopPanel.body);
       el('span', 'menu-item-name', row, item.name + (item.unreg ? ' (unregistered)' : ''));
       el('span', 'menu-item-price', row, `$${item.price}`);
       const btn = el('button', 'menu-btn', row, 'Buy');
-      btn.disabled = state.player.cash < item.price;
+      btn.disabled = state.player.cash + (state.player.bank || 0) < item.price; // cash first, then the bank
       btn.onclick = () => {
         const r = buyItem(state, item.key, shopKey);
         hud.toast(r.msg);
@@ -188,7 +191,7 @@ export function initMenus(hud) {
       b.onclick = () => { phoneTab = t; renderPhone(); };
     }
     el('div', 'menu-note', phonePanel.body,
-      `Cash $${Math.round(state.player.cash)} · Carrying ${carriedGrams(state).toFixed(0)}/${carryCap(state)} g · Heat ${TIER_NAMES[heatTier(state.heat)]} · Gross $${Math.round(eco.gross)}`);
+      `Cash $${Math.round(state.player.cash)} · Bank $${Math.round(state.player.bank || 0)} · Carrying ${carriedGrams(state).toFixed(0)}/${carryCap(state)} g · Heat ${TIER_NAMES[heatTier(state.heat)]} · Gross $${Math.round(eco.gross)}`);
     if (phoneTab === 'orders') {
       if (eco.orders.length === 0) el('div', 'menu-note', phonePanel.body, 'No open orders.');
       for (const o of eco.orders) {
@@ -405,10 +408,13 @@ export function initMenus(hud) {
     el('div', 'menu-report-line', noticePanel.body,
       reason === 'prison' ? 'Third arrest. The judge is not feeling generous.'
         : reason === 'overdose' ? 'A third overdose. This time nobody gets you to the clinic in time.'
-        : reason === 'fugitive' ? 'You killed an officer. Fugitive: the SWAT team came at dawn.' : 'Game over.');
+        : reason === 'fugitive' ? 'You killed an officer. Fugitive: the SWAT team came at dawn.'
+        : reason === 'washedout' ? 'Washed out. Broke, with nothing left to grow, for the second time.' : 'Game over.');
     const row = el('div', 'menu-row', noticePanel.body);
     el('button', 'menu-btn', row, 'Load last autosave').onclick = () =>
       window.dispatchEvent(new CustomEvent('backforty:loadauto'));
+    el('button', 'menu-btn', row, 'Title screen').onclick = () =>
+      window.dispatchEvent(new CustomEvent('backforty:title'));
     show(noticePanel, 'GAME OVER', 'gameover');
   }
 
@@ -443,31 +449,45 @@ export function initMenus(hud) {
     }
   }
 
-  // ------------------------------------------------------------ pause ----
+  // ------------------------------------------------- farm stand (M10) ----
 
-  function openPause(state) {
+  /** The farm-stand front: launder cash into the bank at a fee, up to a daily cap (My Addition 1). */
+  function openStand(state) {
     stateRef = state;
-    pausePanel.body.textContent = '';
-    const row = el('div', 'menu-row', pausePanel.body);
-    const save = el('button', 'menu-btn', row, 'Save (slot 1)');
-    const load = el('button', 'menu-btn', row, 'Load (slot 1)');
-    const resume = el('button', 'menu-btn', row, 'Resume');
-    save.onclick = () => window.dispatchEvent(new CustomEvent('backforty:save'));
-    load.onclick = () => window.dispatchEvent(new CustomEvent('backforty:load'));
-    resume.onclick = () => closeAll();
-    // Sound: master / effects / music sliders and mute (plan §B8).
-    const vols = audio.getVolumes();
-    for (const [kind, label] of [['master', 'Master'], ['sfx', 'Effects'], ['music', 'Music']]) {
-      const r = el('div', 'menu-row', pausePanel.body, `${label} `);
-      const sl = el('input', '', r);
-      sl.type = 'range'; sl.min = 0; sl.max = 1; sl.step = 0.05; sl.value = vols[kind];
-      sl.oninput = () => audio.setVolume(kind, +sl.value);
+    renderStand();
+    show(standPanel, 'Farm stand', 'stand');
+  }
+  function renderStand() {
+    const state = stateRef;
+    const p = state.player;
+    const l = lic(state);
+    standPanel.body.textContent = '';
+    el('div', 'menu-note', standPanel.body,
+      `Cash (dirty) $${Math.round(p.cash)} · Bank (clean) $${Math.round(p.bank || 0)} · Fee ${CONFIG.license.front.fee * 100}% · Room left today $${launderRoom(state)}`);
+    const row = el('div', 'menu-row', standPanel.body);
+    for (const amt of [500, 1000, Infinity]) {
+      el('button', 'menu-btn', row, amt === Infinity ? 'Launder all' : `Launder $${amt}`).onclick = () => {
+        hud.toast(launder(state, amt).msg);
+        renderStand();
+      };
     }
-    const mr = el('div', 'menu-row', pausePanel.body, 'Mute ');
-    const mute = el('input', '', mr);
-    mute.type = 'checkbox'; mute.checked = vols.muted;
-    mute.onchange = () => audio.setMuted(mute.checked);
-    show(pausePanel, 'Paused', 'pause');
+    const up = el('button', 'menu-btn', standPanel.body, l.upgraded ? 'Stand upgraded' : `Upgrade the stand: $${CONFIG.license.front.upgradeCost} (cap $${CONFIG.license.front.upgradeCap}/day)`);
+    up.disabled = l.upgraded;
+    up.onclick = () => { hud.toast(upgradeFront(state).msg); renderStand(); };
+  }
+
+  /** Town hall: the license requirements, sample and application (plan §A14). */
+  function renderLicense(state) {
+    const l = lic(state);
+    el('div', 'menu-note', shopPanel.body, l.granted ? 'You hold the license.'
+      : l.applied ? `Application filed on day ${l.applied.day}: the inspector comes on day ${l.applied.day + CONFIG.license.reviewDays} at ${CONFIG.license.inspectHour}:00.`
+      : 'Business license: every requirement must hold on the day you apply and through the review.');
+    for (const r of licenseReqs(state)) {
+      el('div', 'menu-report-line', shopPanel.body, `${r.ok ? '[x]' : '[ ]'} ${r.label} (${r.detail})`);
+    }
+    const row = el('div', 'menu-row', shopPanel.body);
+    el('button', 'menu-btn', row, 'Submit sample').onclick = () => { hud.toast(submitSample(state).msg); renderShop(); };
+    el('button', 'menu-btn', row, 'Apply for the license').onclick = () => { hud.toast(applyLicense(state).msg); renderShop(); };
   }
 
   // ------------------------------------------------------ report card ----
@@ -547,7 +567,7 @@ export function initMenus(hud) {
   }
 
   return {
-    openShop, openSell, openAlly, openInventory, openPause, openPhone, openNotice, openGameOver,
+    openShop, openSell, openAlly, openInventory, openStand, openPhone, openNotice, openGameOver,
     queueReport,
     closeAll,
     anyOpen: () => open !== null,

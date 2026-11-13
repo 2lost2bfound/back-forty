@@ -12,8 +12,12 @@ import { initInput } from './ui/input.js';
 import { createRenderer } from './render/renderer.js';
 import { initHud } from './ui/hud.js';
 import { initMenus } from './ui/menus.js';
+import { initScreens } from './ui/screens.js';
+import { feedFrame } from './quality.js';
+import { enterLegacy } from './sim/license.js';
+import { heatTier } from './sim/heat.js';
 import {
-  newGame, saveGame, loadGame, autosave, browserStorage, slotKey, autoKey,
+  newGame, saveGame, loadGame, autosave, browserStorage, slotKey, autoKey, deserializeState,
 } from './state.js';
 import { stepPlayer, aimedPot, assignHotbar, interactHint } from './entities/player.js';
 import { plantByPot } from './sim/plants.js';
@@ -36,6 +40,26 @@ const renderer = createRenderer(document.getElementById('game'));
 const input = initInput(document.getElementById('game'));
 const hud = initHud();
 const menus = initMenus(hud);
+const screens = initScreens();
+screens.openTitle(); // the run starts from the title screen (M10)
+
+/** First-time tips (My Addition: polish): each shows once per run, if tips are on. */
+function tip(key) {
+  if (state.tipsSeen[key] || !screens.tipsOn()) return;
+  state.tipsSeen[key] = true;
+  hud.toast(CONFIG.tips[key]);
+}
+
+/** Swap in a new or loaded run. */
+function adopt(next, msg) {
+  state = next;
+  state.paused = false;
+  screens.closeAll();
+  menus.closeAll();
+  renderer.invalidate();
+  if (msg) hud.toast(msg);
+  tip('start');
+}
 
 // Browsers only allow sound after a user gesture (plan §B8).
 for (const ev of ['pointerdown', 'keydown']) window.addEventListener(ev, () => audio.start());
@@ -171,7 +195,7 @@ function processEvents() {
         break;
       case 'dawn': {
         const r = autosave(state, browserStorage);
-        hud.toast(r && r.ok ? `Autosaved (dawn of day ${ev.day})` : 'Autosave failed');
+        hud.toast(r && r.ok ? `Autosaved (dawn of day ${ev.day})` : 'Autosave failed (use Export in the pause menu)');
         break;
       }
       case 'sleep':
@@ -215,6 +239,7 @@ function processEvents() {
         break;
       case 'raidStart':
         hud.toast(`POLICE RAID: ${ev.cops} cops are coming up the road!`);
+        tip('raid');
         break;
       case 'raidWarning':
         hud.toast(ev.source === 'deputy'
@@ -226,6 +251,7 @@ function processEvents() {
         break;
       case 'hostile':
         hud.toast(ev.kind === 'thief' ? 'Someone is creeping around the lot.' : 'Trouble is coming for you tonight.');
+        tip('thief');
         break;
       case 'ko':
         hud.toast('Knocked out. He will crawl off, and word gets around.');
@@ -249,6 +275,18 @@ function processEvents() {
         break;
       case 'gameOver':
         menus.openGameOver(ev.reason);
+        break;
+      case 'win':
+        screens.openWin(state);
+        break;
+      case 'inspector':
+        hud.toast('The license inspector is walking your lot.');
+        break;
+      case 'openStand':
+        menus.openStand(state);
+        break;
+      case 'hardUse':
+        tip('addiction');
         break;
       case 'openShop':
         menus.openShop(state, ev.shop);
@@ -280,7 +318,9 @@ function frame(now) {
   last = now;
   lastDt = dt;
 
-  state.paused = menus.anyOpen();
+  state.paused = menus.anyOpen() || screens.anyOpen();
+  const stepped = feedFrame(Math.min(rawMs, 100)); // automatic quality step-down (My Addition 12)
+  if (stepped) hud.toast('Reduced effects to keep the game smooth.');
   readInput();
 
   if (state.paused) {
@@ -324,15 +364,17 @@ function frame(now) {
   if (input.wasPressed('F4')) {
     state.stressOn = !state.stressOn;
   }
+  const screenBusy = screens.anyOpen();
   if (input.wasPressed('Escape') || input.wasPressed('KeyE')) {
-    if (menus.isOpen('gameover')) { /* only its button leaves */ }
+    if (menus.isOpen('gameover') || screens.isOpen('title') || screens.isOpen('win') || screens.isOpen('settings')) { /* only their buttons leave */ }
+    else if (screenBusy) screens.closeAll();
     else if (menus.anyOpen()) menus.closeAll();
-    else if (input.wasPressed('Escape')) menus.openPause(state);
+    else if (input.wasPressed('Escape')) screens.openPause(state);
   }
-  if (input.wasPressed('KeyI') && !menus.anyOpen()) menus.openInventory(state);
+  if (input.wasPressed('KeyI') && !menus.anyOpen() && !screenBusy) menus.openInventory(state);
   if (input.wasPressed('Tab')) {
     if (menus.isOpen('phone')) menus.closeAll();
-    else if (!menus.anyOpen()) menus.openPhone(state);
+    else if (!menus.anyOpen() && !screenBusy) menus.openPhone(state);
   }
 
   processEvents();
@@ -343,6 +385,9 @@ function frame(now) {
     lastUi = now;
     hud.update(state, interactHint(state));
     menus.tick(state, hoverInfo);
+    if (heatTier(state.heat) >= 1) tip('heat');
+    if (state.economy.gross >= CONFIG.tips.licenseGross || state.player.level >= CONFIG.license.level - 1) tip('license');
+    if (state.time.day >= CONFIG.tips.crewDay) tip('crew');
   }
 
   input.endFrame();
@@ -374,22 +419,29 @@ window.addEventListener('backforty:assign', (e) => {
 window.addEventListener('backforty:loadauto', () => {
   const loaded = loadGame(autoKey(1), browserStorage);
   if (!loaded) { hud.toast('No autosave yet.'); return; }
-  state = loaded;
-  menus.closeAll();
-  renderer.invalidate();
-  hud.toast('Loaded the last autosave.');
+  adopt(loaded, 'Loaded the last autosave.');
 });
-window.addEventListener('backforty:save', () => {
-  const r = saveGame(state, slotKey(1), browserStorage);
-  hud.toast(r.ok ? 'Saved.' : `Save failed: ${r.error}`);
+window.addEventListener('backforty:save', (e) => {
+  const r = saveGame(state, slotKey(e.detail.slot), browserStorage);
+  if (r.ok) hud.toast('Saved.');
+  else screens.openExportOffer(r.error, r.json); // never swallowed (plan §B4)
 });
-window.addEventListener('backforty:load', () => {
-  const loaded = loadGame(slotKey(1), browserStorage);
+window.addEventListener('backforty:load', (e) => {
+  const loaded = loadGame(e.detail.key, browserStorage);
   if (!loaded) { hud.toast('Nothing to load.'); return; }
-  state = loaded;
-  menus.closeAll();
-  renderer.invalidate();
-  hud.toast('Loaded.');
+  adopt(loaded, 'Loaded.');
+});
+window.addEventListener('backforty:newgame', (e) => {
+  adopt(newGame((Math.random() * 0x7fffffff) | 0, { difficulty: e.detail.difficulty }));
+});
+window.addEventListener('backforty:import', (e) => {
+  const loaded = deserializeState(e.detail.json);
+  if (!loaded) { hud.toast('That file is not a Back Forty save.'); return; }
+  adopt(loaded, 'Imported.');
+});
+window.addEventListener('backforty:title', () => { menus.closeAll(); screens.openTitle(); });
+window.addEventListener('backforty:legacy', () => {
+  if (enterLegacy(state)) hud.toast('Legacy mode: growing and selling no longer raise heat. Thieves and Dale remain.');
 });
 
 // Preallocated stress-rectangle pool: [x, y, vx, vy] per rectangle.

@@ -295,7 +295,7 @@ test('skimming: Greed > loyalty keeps 5-15% of each payment; ledger shows expect
   const full = 20 * (4 + 8) * 0.8;
   const got = s.player.cash - cash0;
   assert.ok(got < full * 0.95 + 1e-9 && got >= full * 0.85 - 1e-9, `kept 5-15%: got ${got} of ${full}`);
-  const e = s.economy.ledger.at(-1);
+  const e = s.economy.ledger.filter((x) => x.buyer === 'skeet').at(-1); // a referral line may follow the sale
   assert.ok(Math.abs(e.amount - got) < 1e-9, 'ledger shows received');
   assert.ok(Math.abs(e.expected - full) < 1e-9, 'and expected');
   assert.ok(m.skimmed > 0);

@@ -193,9 +193,9 @@ export const CONFIG = {
   // Heat (plan §A5). Heat is 0-100 with a floor it can never drop below.
   heat: {
     floorStart: 0,
-    decay: { low: 2, high: 1 },          // per day: Cold/Warm, Hot/Burning
+    decay: { low: 3, high: 1.5 },        // per day: Cold/Warm, Hot/Burning
     layLowMult: 2,                       // a day with zero sales doubles decay
-    farmStandDecay: 1,                   // extra per day with a farm-stand front (M10 sets it)
+    farmStandDecay: 2,                   // extra per day with a farm-stand front (M10 sets it)
     visiblePlant: 0.3,                   // per plant visible from the road, per day
     smell: { indoor: 0.2, outdoor: 0.1, rack: 0.5 }, // flowering/drying, unfiltered, per day
     filterRadius: 6,                     // tiles; carbon filter removes smell heat
@@ -263,7 +263,7 @@ export const CONFIG = {
     qualityPerLevel: 2,    // +2 quality per level above 1
     tendingPerLevel: 0.04, // -4% tending time per level above 1
     xpBase: 0.5,           // XP = dry grams x (xpBase + quality/100)
-    levelXp: [0, 100, 250, 500, 900, 1500, 2300, 3400, 4800, 6500], // total XP for L1..L10
+    levelXp: [0, 80, 200, 400, 700, 1100, 1800, 2800, 4200, 6000], // total XP for L1..L10
     // Perks by the level that grants them.
     perks: {
       3: 'Exact moisture without a meter; Blue Haze seeds',
@@ -415,7 +415,7 @@ export const CONFIG = {
     trust: {
       thresholds: [10, 30, 60, 100, 150],
       priceMult: [0.8, 0.9, 1.0, 1.1, 1.2, 1.3],
-      full: 10, qualityBonus: 5, qualityBonusOver: 20,
+      full: 40, qualityBonus: 14, qualityBonusOver: 20,
       partial: 3, partialMin: 0.5, late: 0, missed: -15,
     },
     lateGraceGh: 12,
@@ -696,14 +696,35 @@ export const CONFIG = {
     partialWithinGh: 8,    // deliver half an order when the deadline is this close
     streetPerDay: 10, streetKeep: 20, streetReserveMult: 1.2,
     // Heat-aware policy (M4): hide the grow underground, stay quiet.
+    streetEarlyDays: 16, streetEarlyHeat: 30, // early on, street sales run up to this heat (raids need 50)
     streetMaxHeat: 20,       // street sales only below this heat
-    bribeAt: 40,             // bribe the deputy at/above this heat (after day 6)
+    sellHeatCap: 46,         // no sales to heat-carrying buyers at or above this heat (raids start at 50)
+    bribeAfterGross: 1000,   // ...once the run has grossed this much
+    bribeReserve: 600,       // cash kept for the deputy once raids are possible
+    stashAfterGross: 1000,   // buy the buried stash box once the run has grossed this much
+    stashAt: 22, fetchAt: 7, launderHour: 21, // bury cash/product at night, dig up after the raid hour, launder in the evening
+    tributeAfterGross: 5000, tributeAt: 20, // pay Dale's weekly tribute once the run is worth his attention
+    quietSellHeat: 15,       // while quiet, sell to heat-carrying buyers only below this heat
+    preQuietBank: 42000,     // from this bank balance bribe at 17+ heat so the application can go in the day the bank is full
+    quietBribeMargin: 4,     // while quiet, bribe when heat exceeds the license limit by this much
+    bribeAt: 36,             // bribe the deputy at/above this heat (after day 6)
     outdoorCap: 12,          // plants grown outdoors before the room exists
     roomCost: 1100,          // cash needed to dig the room (hatch + first lamps + filter)
     roomX0: 60, roomWidth: 44, roomTop: 6, roomRows: 3, // tiles below the surface
     securityAfterGross: 2500, // the bot buys locks/dog/floodlights once it has grossed this much
     dogReserve: 300,         // cash kept back after buying the dog
     shaftX: 58,              // the shaft (and its hatch) sits just outside the shack
+    sweepSeeds: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], sweepDays: 70, carelessDays: 25,
+    licenseFrom: 30, licenseTo: 50, needLicense: 6, carelessRaidBy: 20, // M10 gate (plan §D4)
+    carelessStreetPerDay: 25, // the careless bot approaches everyone it meets
+    carelessCap: 30,         // the careless policy grows this many outdoor pots in plain view
+    frontReserve: 400,       // cash kept after buying the front / upgrade
+    frontAfterGroups: 7, frontByDay: 28, // ...once the room has this many lamp groups, or by this day
+    frontAfterGross: 1500,   // buy the farm-stand front once the run has grossed this much
+    upgradeAfterLaundered: 2500, // upgrade the stand once this much has been laundered
+    cutStock: 8, cutsPerMother: 2, motherHealth: 70, // clones: keep up to cutStock cuttings, from healthy mothers
+    expandKeep: 1100,        // ...plus the next lamp group's cost while the room is still growing
+    launderKeep: 500,        // working cash kept back from the stand
     maxGroups: 7,            // 4 pots + 1 HPS lamp per group (28 plants, under the 30 line)
     generatorAtGroups: 3,    // buy the generator (no lamp heat) from this many groups
     filterEveryGroups: 2,    // one carbon filter per this many groups
@@ -785,6 +806,40 @@ export const CONFIG = {
       fadeSec: 3, lookaheadSec: 3, tickMs: 1000,
     },
   },
+
+  // License, laundering, end states (plan §A14, §A15, My Additions 1, 12, 13). M10.
+  license: {
+    bankRequired: 50000,       // clean money in the Bank
+    level: 5,                  // Grower level
+    sample: { quality: 70, grams: 28 },
+    heatMax: 20,               // on the day you apply and through the review
+    arrestFreeDays: 10,
+    reviewDays: 3, inspectHour: 12, inspectGh: 2,   // inspector walks the lot 60 s (= 2 gh at 30 s/gh)
+    front: { x: 136, cap: 2500, upgradeCost: 4000, upgradeCap: 5000, fee: 0.15 },
+    // Washed out: cash + bank under `money` with nothing to grow for `hours`.
+    washed: { money: 20, hours: 48, rescueSeeds: 2 },
+  },
+  // Difficulty presets (My Addition 13): multiply threat chances and heat gains.
+  difficulty: {
+    relaxed: { label: 'Relaxed', mult: 0.7 },
+    standard: { label: 'Standard', mult: 1.0 },
+    harsh: { label: 'Harsh', mult: 1.3 },
+  },
+  // Automatic quality step-down (My Addition 12): average frame time over the
+  // window above the limit steps down one level (particles, soft lights, peds).
+  quality: { avgMs: 18, windowS: 2, particleScale: 0.5, pedCap: 4, maxLevel: 3 },
+  // First-time tips: shown once each, the first time the situation arises.
+  tips: {
+    start: 'Water and feed your plants, harvest when ripe, sell to Skeet in the park. Tab opens your phone.',
+    heat: 'Heat rises as you sell and grow. Hide your grow underground and lay low when it climbs.',
+    raid: 'Raids seize CASH on your lot, never the bank. Launder cash through the farm stand.',
+    license: 'The town hall issues the license: $50,000 in the Bank, the farm stand, Grower level 5, a quality-70 sample, and heat at 20 or less.',
+    crew: 'Hire help at the bar board when you cannot tend everything.',
+    thief: 'Thieves come at night. A lock, a dog and floodlights are cheap insurance.',
+    addiction: 'Hard drugs help now and cost you later. You can quit at the clinic.',
+    crewDay: 12, licenseGross: 8000, // tip thresholds: the crew tip from this day, the license tip at this gross
+  },
+  save: { slots: 3, settingsKey: 'backforty.settings' },
 
   // HUD/menus (plan §B7: DOM over the canvas, 4 Hz dirty-checked updates).
   ui: {

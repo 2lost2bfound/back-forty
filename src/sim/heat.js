@@ -13,7 +13,7 @@
 import { CONFIG } from '../config.js';
 import { withStateRng } from '../rng.js';
 import { stageOf } from './plants.js';
-import { checkLose } from './license.js';
+import { checkLose, lic, difficultyMult, legacyQuiet } from './license.js';
 import { stressEvent } from './addiction.js';
 import { roomOf, isBuried, visibleFromRoad } from '../world/rooms.js';
 import { findPath } from '../world/nav.js';
@@ -52,6 +52,7 @@ export function heatTier(heat) {
 /** Move the meter by n (clamped to [floor, 100]) and log it for the scanner. */
 export function addHeat(state, n, label) {
   const h = hs(state);
+  if (n > 0) n *= difficultyMult(state);
   state.heat = Math.max(h.floor, Math.min(E.heatMax, (state.heat || 0) + n));
   if (label && n) {
     h.log.push({ label, amount: round2(n) });
@@ -109,7 +110,7 @@ export function dailyHeat(state) {
   h.log = [];
   const filters = state.objects.filter((o) => o.kind === 'filter');
   const filtered = (o) => filters.some((f) => near(f, o, H.filterRadius));
-  const alive = state.plants.filter((p) => !p.dead);
+  const alive = legacyQuiet(state) ? [] : state.plants.filter((p) => !p.dead); // Legacy: growing makes no heat
   let visible = 0, smellIn = 0, smellOut = 0;
   for (const plant of alive) {
     const pot = state.objects.find((o) => o.id === plant.potId);
@@ -125,11 +126,11 @@ export function dailyHeat(state) {
   if (smellIn) addHeat(state, smellIn * H.smell.indoor, `Smell: ${smellIn} indoor plant(s)`);
   if (smellOut) addHeat(state, smellOut * H.smell.outdoor, `Smell: ${smellOut} outdoor plant(s)`);
   let racks = 0;
-  for (const o of state.objects) {
+  for (const o of legacyQuiet(state) ? [] : state.objects) {
     if (o.kind === 'rack' && state.product.some((b) => b.where === o.id) && !filtered(o)) racks++;
   }
   if (racks) addHeat(state, racks * H.smell.rack, `Smell: ${racks} loaded rack(s)`);
-  if (!state.objects.some((o) => o.kind === 'generator')) {
+  if (!legacyQuiet(state) && !state.objects.some((o) => o.kind === 'generator')) {
     let lamps = 0;
     for (const o of state.objects) {
       if (o.kind !== 'lamp') continue;
@@ -161,7 +162,7 @@ export function raidChance(state, heat = state.heat) {
   if (heat >= R.burning.from) c = R.burning.base + (heat - R.burning.from) * R.burning.perPoint;
   else if (heat >= R.hot.from) c = (heat - R.hot.from) * R.hot.perPoint;
   if (lawyerActive(state)) c *= R.lawyerChanceMult;
-  return Math.min(1, c);
+  return Math.min(1, c * difficultyMult(state));
 }
 
 /** Find chance of a hidden room (plan §A5): 30% + (heat-50)%, K-9, snitch. */
@@ -261,6 +262,7 @@ export function arrestPlayer(state, reason) {
   const h = hs(state);
   const p = state.player;
   p.arrests = (p.arrests || 0) + 1;
+  lic(state).lastArrestDay = state.time.day;
   checkLose(state);
   if (state.gameOver) return { arrests: p.arrests, gameOver: true };
   const bail = R.bail[Math.min(p.arrests, R.bail.length) - 1];

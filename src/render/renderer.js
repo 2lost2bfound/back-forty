@@ -185,7 +185,7 @@ export function createRenderer(canvas) {
   const NEW_OBJECTS = {
     tripwire: '#b9b9b9', floodlight: '#f5f0a0', camera: '#2b2b2b',
     lamp: '#f2e48a', stash: '#7a5a34', safe: '#6c7480', filter: '#3b3f46',
-    generator: '#c9632b', hatch: 'rgba(40,28,16,0.9)',
+    generator: '#c9632b', hatch: 'rgba(40,28,16,0.9)', farmstand: '#d9b44a',
   };
   function drawNewObject(o, sx, py) {
     ctx.fillStyle = NEW_OBJECTS[o.kind];

@@ -3,6 +3,7 @@
 // allocates nothing. Browser-only (draws to a 2D context).
 
 import { CONFIG } from '../config.js';
+import { quality } from '../quality.js';
 
 const W = CONFIG.canvas.width;
 const H = CONFIG.canvas.height;
@@ -17,7 +18,8 @@ for (let i = 0; i < N; i++) { xs[i] = (i * 97) % W; ys[i] = (i * 53) % H; }
 
 export function drawRain(ctx, dt) {
   ctx.fillStyle = 'rgba(170,200,235,0.6)';
-  for (let i = 0; i < N; i++) {
+  const n = (N * quality.particleScale) | 0; // step-down halves the cap
+  for (let i = 0; i < n; i++) {
     let y = ys[i] + SPEED * dt;
     let x = xs[i] + DRIFT * dt;
     if (y > H) { y -= H + LEN; x = (x + 211) % W; }

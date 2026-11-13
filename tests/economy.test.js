@@ -72,7 +72,7 @@ test('full order on time: +10 trust, paid at the trust multiplier', () => {
   const cash0 = s.player.cash;
   const r = fillOrder(s, o.id);
   assert.equal(r.outcome, 'full');
-  assert.equal(s.economy.buyers.skeet.pts, 10);
+  assert.equal(s.economy.buyers.skeet.pts, CONFIG.economy.trust.full); // tuned in M10 (plan: +10)
   const expected = o.grams * (4 + 0.1 * 38) * 0.8; // trust 0 multiplier
   assert.ok(Math.abs(s.player.cash - cash0 - expected) < 1e-6);
   assert.equal(orderOf(s, 'skeet'), undefined);
@@ -84,7 +84,7 @@ test('quality 20+ over the minimum adds +5', () => {
   at(s, 3, 14);
   const o = orderNow(s, 'skeet'); // min quality 20
   stock(s, 40, 40);
-  assert.equal(fillOrder(s, o.id).pts, 15);
+  assert.equal(fillOrder(s, o.id).pts, CONFIG.economy.trust.full + CONFIG.economy.trust.qualityBonus); // plan: 10 + 5
 });
 
 test('partial fill (50%+) on time: +3 and the order closes; under 50% is refused', () => {
@@ -196,17 +196,17 @@ test('Skeet never leaves for more than 2 days; Tone/Vivian misses feed Dale', ()
 test('referrals: trust 2 with Skeet -> Marla; Marla 3 -> Doc, 4 -> Tone; Tone 3 -> Vivian', () => {
   const s = game();
   at(s, 3, 19);
-  const give = (key, pts) => { s.economy.buyers[key].known = true; s.economy.buyers[key].pts = pts - 10; };
+  const G = CONFIG.economy.trust.full + CONFIG.economy.trust.qualityBonus; // points one on-time, high-quality delivery earns
+  const give = (key, pts) => { s.economy.buyers[key].known = true; s.economy.buyers[key].pts = pts - G; };
   const deliver = (key) => {
     const o = orderNow(s, key);
     stock(s, o.grams + 5, 90);
     assert.ok(fillOrder(s, o.id).ok);
   };
-  s.economy.buyers.skeet.pts = 10; // level 1
+  s.economy.buyers.skeet.pts = 29 - G; // one delivery lands just under level 2 (needs 30)
   assert.equal(s.economy.buyers.marla.known, false);
-  // Skeet to level 2 (needs 30): +10 +5 bonus per full order
   deliver('skeet'); assert.equal(s.economy.buyers.marla.known, false);
-  s.economy.buyers.skeet.pts = 15; deliver('skeet'); // 15 -> 30
+  s.economy.buyers.skeet.pts = 30 - G; deliver('skeet'); // -> exactly 30
   assert.ok(s.economy.buyers.marla.known);
   give('marla', 60); deliver('marla');       // 60 pts = level 3 after +10
   assert.ok(s.economy.buyers.doc.known);

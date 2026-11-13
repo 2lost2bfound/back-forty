@@ -94,7 +94,8 @@ export function initHud() {
       const weather = w0[0].toUpperCase() + w0.slice(1);
       const topStr = formatClock(state.time);
       if (topStr !== lastTop) { lastTop = topStr; clockEl.textContent = topStr; }
-      const cashStr = `$${Math.round(state.player.cash)}${state.sleeping ? '  (sleeping)' : ''}`;
+      const bankStr = state.player.bank > 0 ? `  Bank $${Math.round(state.player.bank)}` : '';
+      const cashStr = `$${Math.round(state.player.cash)}${bankStr}${state.legacy ? '  LEGACY' : ''}${state.sleeping ? '  (sleeping)' : ''}`;
       if (cashStr !== cashEl.textContent) cashEl.textContent = cashStr;
       const wStr = weather === 'Clear' ? '' : weather;
       if (wStr !== weatherEl.textContent) weatherEl.textContent = wStr;

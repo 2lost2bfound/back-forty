@@ -17,6 +17,7 @@ import { strainUnlocked } from './mastery.js';
 import { canBuyDog, giveDog, dogHurt, healDog } from '../entities/dog.js';
 import { buyTruce } from './threats.js';
 import { shopBlocked, priceMult } from './allies.js';
+import { spendMoney, canAfford, buyFront, legacyQuiet } from './license.js';
 import { dealerPrice, buyerPenalty, canTaper, startTaper, detox, useSubstance } from './addiction.js';
 import {
   addHeat, heatTier, noteSale, noteSpend, bribeDeputy, bribePrice, hireLawyer, rumorText,
@@ -103,10 +104,10 @@ export function buyItem(state, key, shopKey = 'hardware') {
   if (key === 'dog' && !canBuyDog(state)) return { ok: false, msg: 'You already have a dog.' };
   if (key === 'taper' && !canTaper(state)) return { ok: false, msg: 'You already have a taper kit for today.' };
   if (key === 'vet' && !dogHurt(state)) return { ok: false, msg: 'Your dog is fine.' };
-  if (p.cash < entry.price) return { ok: false, msg: 'Not enough cash.' };
+  if (!canAfford(state, entry.price)) return { ok: false, msg: 'Not enough cash.' };
   if (key === 'ask_around') return askAround(state);
-  p.cash -= entry.price;
-  noteSpend(state, entry.price);
+  if (key === 'permit') return buyFront(state); // pays from cash, then bank
+  spendMoney(state, entry.price); // cash (dirty) first, then bank; dirty spending feeds flashy heat
   if (entry.service) {
     state.events.push({ type: 'service', key });
     if (key === 'drink') {
@@ -386,7 +387,7 @@ export function fillOrder(state, orderId, opts = {}) {
   const paid = q.value * (1 - (opts.cut || 0));
   state.player.cash += paid;
   state.economy.gross += paid;
-  if (def.heat) addHeat(state, E.saleHeat[lvl], `Sale to ${def.name}`);
+  if (def.heat && !legacyQuiet(state)) addHeat(state, E.saleHeat[lvl], `Sale to ${def.name}`);
   noteSale(state);
   bs.pts += pts;
   bs.streak = 0;
@@ -540,7 +541,7 @@ export function streetSale(state, ped) {
   take();
   state.player.cash += value;
   state.economy.gross += value;
-  addHeat(state, S.heat, 'Street sale to a stranger');
+  if (!legacyQuiet(state)) addHeat(state, S.heat, 'Street sale to a stranger');
   noteSale(state);
   state.economy.streetSales.push(nowGh(state));
   ledger(state, `Street sale, ${grams} g`, value);

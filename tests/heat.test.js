@@ -175,7 +175,7 @@ test('daily sources: visible plants, smell, racks, filter, lamps, generator, big
   assert.equal(l('visible from the road'), 1.2);
   assert.equal(l('Smell: 4 outdoor'), 0.4);
   assert.equal(l('Smell: 1 loaded rack'), 0.5);
-  assert.equal(l('Laying low'), -4);
+  assert.equal(l('Laying low'), -H.decay.low * H.layLowMult);
   assert.equal(s.heat, 0); // clamped at the floor, 2.1 up then -4
 
   // Filter within 6 tiles removes all smell heat.
@@ -225,7 +225,7 @@ test('underground and walled-in plants are never visible; indoor smell is the in
   assert.equal(entry(s, 'Smell: 1 indoor').amount, 0.2);
 });
 
-test('decay: -2 at Cold/Warm, -1 at Hot/Burning, doubled on a zero-sale day, farm stand -1', () => {
+test('decay: low at Cold/Warm, high at Hot/Burning (config), doubled on a zero-sale day, plus the farm stand', () => {
   const decayAt = (heat, sales, front) => {
     const s = game();
     s.heat = heat;
@@ -234,13 +234,14 @@ test('decay: -2 at Cold/Warm, -1 at Hot/Burning, doubled on a zero-sale day, far
     dailyHeat(s);
     return heat - s.heat;
   };
-  assert.equal(decayAt(10, true), 2);
-  assert.equal(decayAt(40, true), 2);
-  assert.equal(decayAt(60, true), 1);
-  assert.equal(decayAt(90, true), 1);
-  assert.equal(decayAt(10, false), 4);
-  assert.equal(decayAt(60, false), 2);
-  assert.equal(decayAt(60, true, true), 2);
+  const D = H.decay;
+  assert.equal(decayAt(10, true), D.low);
+  assert.equal(decayAt(40, true), D.low);
+  assert.equal(decayAt(60, true), D.high);
+  assert.equal(decayAt(90, true), D.high);
+  assert.equal(decayAt(10, false), D.low * H.layLowMult);
+  assert.equal(decayAt(60, false), D.high * H.layLowMult);
+  assert.equal(decayAt(60, true, true), D.high + H.farmStandDecay);
 });
 
 test('bribe the deputy: after day 6, -15 for $500, 5-day cooldown, +$250 each use', () => {

@@ -23,6 +23,7 @@ import { raycastSolid } from '../world/physics.js';
 import { damageEntity, enemyShoot, hurtPlayer, stepCops, groundY, HOSTILE_KINDS } from '../entities/combat.js';
 import { dogHomeX } from '../entities/dog.js';
 import { stressEvent } from './addiction.js';
+import { difficultyMult } from './license.js';
 import { allyTargetNear, strikeAlly } from './allies.js';
 
 const TH = CONFIG.threats;
@@ -145,7 +146,7 @@ export function breakInChance(state) {
     generator: gen ? BI.generator : 0, security: sec.total, word, sellout,
   };
   const raw = parts.product + parts.ripe + parts.street + parts.generator + parts.sellout - parts.security - parts.word;
-  return { ...parts, raw, total: Math.max(BI.min, Math.min(BI.max, raw)) };
+  return { ...parts, raw, total: Math.max(BI.min, Math.min(BI.max, raw)) * difficultyMult(state) };
 }
 
 /** 01:00 each night: feud first, then the ordinary break-in roll. */
@@ -478,7 +479,7 @@ function stepDispatch(state) {
 // sabotage types, goon squads from 70, tribute and truce. All of it goes
 // through the director, and Dale himself is never on screen.
 
-const pctOf = (state) => Math.min(RV.maxChance, rv(state).aggression * RV.chancePerPoint) / 100;
+const pctOf = (state) => Math.min(RV.maxChance, rv(state).aggression * RV.chancePerPoint) / 100 * difficultyMult(state);
 export const rivalChance = pctOf;
 
 /** Move Dale's aggression. Gains are ignored while a truce holds. */

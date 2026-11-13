@@ -589,7 +589,7 @@ export function interactTarget(state) {
       consider({ kind: 'barrel', obj: o }, x, y);
     } else if (o.kind === 'bed') {
       consider({ kind: 'bed', obj: o }, x, y);
-    } else if (o.kind === 'lamp' || o.kind === 'stash' || o.kind === 'safe') {
+    } else if (o.kind === 'lamp' || o.kind === 'stash' || o.kind === 'safe' || o.kind === 'farmstand') {
       consider({ kind: o.kind, obj: o }, x, y);
     }
   }
@@ -663,6 +663,7 @@ export function interactHint(state) {
     case 'door': return 'E: Fit a lock to the door';
     case 'lamp': return `E: Lamp timer ${t.obj.hours} h (switch to ${t.obj.hours === CONFIG.lamps.hoursNormal ? CONFIG.lamps.hoursLong : CONFIG.lamps.hoursNormal} h)`;
     case 'stash': case 'safe': return `E: Use the ${t.kind} (put in / take out)`;
+    case 'farmstand': return 'E: Farm stand (launder cash)';
     default: return null;
   }
 }
@@ -755,6 +756,9 @@ export function handleInteract(state) {
     case 'stash':
     case 'safe':
       state.events.push({ type: 'toast', msg: useContainer(state, obj) });
+      break;
+    case 'farmstand':
+      state.events.push({ type: 'openStand' });
       break;
     case 'door': {
       const r = installLock(state);
