@@ -75,6 +75,7 @@ export function tendMult(state) {
   else if (d.t < c.crashUntil) m *= A.substances.crank.crashTendMult;
   if (d.weed) m *= A.weed.tendMult;
   if (d.craving) m *= A.recovery.cravingTendMult;
+  if (state.allies && nowGh(state) < state.allies.griefUntil) m *= CONFIG.allies.grief.tendMult; // an ally died (M9)
   return m;
 }
 

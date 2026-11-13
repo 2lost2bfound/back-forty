@@ -19,6 +19,13 @@ import {
   boardCandidates, describe, hire, fire, giveBonus, bailOut, dockPay, threaten, toggleOutgoing, placeMarker, crewOf,
 } from '../sim/crew.js';
 
+import {
+  ALLY_KEYS, allyOf, alOf, hearts, giftOptions, giveGift, drinkTogether, acceptFavor, completeFavor, describeFavor,
+  canCall, callAlly, arrivalSeconds, payBill, bailAlly, leaveInJail, answerLoan,
+} from '../sim/allies.js';
+
+const hearts5 = (n) => '\u2665'.repeat(n) + '\u2661'.repeat(5 - n);
+
 function el(tag, cls, parent, text) {
   const e = document.createElement(tag);
   if (cls) e.className = cls;
@@ -53,10 +60,11 @@ export function initMenus(hud) {
   const reportPanel = makePanel('report');
   const phonePanel = makePanel('phone');
   const noticePanel = makePanel('notice');
+  const allyPanel = makePanel('ally');
 
   function closeAll() {
     open = null;
-    for (const p of [shopPanel, sellPanel, invPanel, pausePanel, reportPanel, phonePanel, noticePanel]) {
+    for (const p of [shopPanel, sellPanel, invPanel, pausePanel, reportPanel, phonePanel, noticePanel, allyPanel]) {
       p.panel.style.display = 'none';
     }
   }
@@ -86,7 +94,7 @@ export function initMenus(hud) {
     if (!shopOpen(state.time, shopKey)) {
       el('div', 'menu-note', shopPanel.body, `Closed. Open ${hrs(sh.open)}-${hrs(sh.close)}.`);
     }
-    if (shopKey === 'bar') renderBoard(state);
+    if (shopKey === 'bar') { renderBoard(state); renderDrinks(state); }
     for (const item of shopStock(shopKey, state)) {
       const row = el('div', 'menu-row', shopPanel.body);
       el('span', 'menu-item-name', row, item.name + (item.unreg ? ' (unregistered)' : ''));
@@ -99,6 +107,18 @@ export function initMenus(hud) {
         renderShop();
         shopPanel.title.textContent = `${sh.label} — $${Math.round(state.player.cash)}`;
       };
+    }
+  }
+
+  /** Drink together (plan A13): +3 friendship, costs a Booze use. */
+  function renderDrinks(state) {
+    for (const id of ALLY_KEYS) {
+      const a = allyOf(state, id);
+      if (a.status !== 'ok' || a.estranged) continue;
+      const row = el('div', 'menu-row', shopPanel.body);
+      el('span', 'menu-item-name', row, `Drink with ${CONFIG.allies.defs[id].name} ${hearts5(hearts(state, id))}`);
+      el('span', 'menu-item-price', row, `$${CONFIG.allies.drinkPrice}`);
+      el('button', 'menu-btn', row, 'Drink').onclick = () => { hud.toast(drinkTogether(state, id).msg); renderShop(); };
     }
   }
 
@@ -163,7 +183,7 @@ export function initMenus(hud) {
     const eco = state.economy;
     phonePanel.body.textContent = '';
     const tabs = el('div', 'menu-row', phonePanel.body);
-    for (const t of ['orders', 'contacts', 'ledger', 'heat', 'crew', 'journal', 'status']) {
+    for (const t of ['orders', 'contacts', 'ledger', 'heat', 'crew', 'allies', 'journal', 'status']) {
       const b = el('button', 'menu-btn', tabs, t === phoneTab ? `[${t}]` : t);
       b.onclick = () => { phoneTab = t; renderPhone(); };
     }
@@ -205,6 +225,8 @@ export function initMenus(hud) {
       }
     } else if (phoneTab === 'crew') {
       renderCrewTab(state);
+    } else if (phoneTab === 'allies') {
+      renderAlliesTab(state);
     } else if (phoneTab === 'journal') {
       renderJournal(state);
     } else if (phoneTab === 'status') {
@@ -268,6 +290,65 @@ export function initMenus(hud) {
     const w = el('div', 'menu-row', body, `Own weed${s.weedLeft > 0 ? ` · active ${s.weedLeft.toFixed(1)} gh` : ''}`);
     el('button', 'menu-btn', w, 'Smoke 1 g').onclick = () => { hud.toast(useSubstance(state, 'weed').msg); renderPhone(); };
     el('div', 'menu-note', body, 'Keys: Z crank, X blues, V smoke your own. Clinic: taper kit and detox.');
+  }
+
+  /** Phone > Allies (plan A13): hearts, Call, hospital bill, bail, Benny's loan. */
+  function renderAlliesTab(state) {
+    const body = phonePanel.body;
+    const al = alOf(state);
+    const act = (label, row, fn) => {
+      el('button', 'menu-btn', row, label).onclick = () => { hud.toast(fn().msg || ''); renderPhone(); };
+    };
+    if (al.loan && al.loan.status === 'asked') {
+      const row = el('div', 'menu-row', body, `Benny asks for a $${CONFIG.allies.loan.amount} loan.`);
+      act('Lend', row, () => answerLoan(state, true));
+      act('Refuse', row, () => answerLoan(state, false));
+    }
+    for (const id of ALLY_KEYS) {
+      const a = allyOf(state, id);
+      const d = CONFIG.allies.defs[id];
+      const status = a.status === 'dead' ? 'dead' : a.estranged ? 'estranged' : a.status === 'ok' ? '' : a.status;
+      const row = el('div', 'menu-row', body, `${d.name} ${hearts5(hearts(state, id))} (${Math.round(a.pts)} pts)${status ? ` - ${status}` : ''}`);
+      if (a.status === 'ok' && !a.estranged) {
+        const c = canCall(state, id);
+        const b = el('button', 'menu-btn', row, c.ok ? `Call (${arrivalSeconds(state, id)} s)` : `Call: ${c.msg}`);
+        b.disabled = !c.ok;
+        b.onclick = () => { hud.toast(callAlly(state, id).msg); renderPhone(); };
+      }
+      if (a.status === 'hospital' && a.bill) act(`Pay bill $${CONFIG.allies.downed.bill}`, row, () => payBill(state, id));
+      if (a.status === 'jailed' && !a.bailed && !a.decided) {
+        act(`Bail $${CONFIG.allies.arrest.bail}`, row, () => bailAlly(state, id));
+        act('Leave them in', row, () => leaveInJail(state, id));
+      }
+    }
+  }
+
+  /** Talk to an ally at their spot: gifts and the day's favor. */
+  function openAlly(state, id) {
+    stateRef = state;
+    renderAlly(id);
+    show(allyPanel, CONFIG.allies.defs[id].name, 'ally');
+  }
+
+  function renderAlly(id) {
+    const state = stateRef;
+    const a = allyOf(state, id);
+    allyPanel.body.textContent = '';
+    el('div', 'menu-note', allyPanel.body, `${hearts5(hearts(state, id))}  ${Math.round(a.pts)} pts${a.estranged ? ' - estranged: favors only' : ''}`);
+    const f = a.favor;
+    if (f) {
+      const row = el('div', 'menu-row', allyPanel.body, `Favor: ${describeFavor(id, f)}`);
+      if (!f.accepted) el('button', 'menu-btn', row, 'Accept').onclick = () => { hud.toast(acceptFavor(state, id).msg); renderAlly(id); };
+      else el('button', 'menu-btn', row, 'Done').onclick = () => { hud.toast(completeFavor(state, id).msg); renderAlly(id); };
+    } else el('div', 'menu-note', allyPanel.body, 'No favor to ask right now.');
+    if (!a.estranged) {
+      el('div', 'menu-note', allyPanel.body, 'Give a gift (one a day):');
+      for (const g of giftOptions(state, id)) {
+        const row = el('div', 'menu-row', allyPanel.body);
+        el('span', 'menu-item-name', row, g.label);
+        el('button', 'menu-btn', row, 'Give').onclick = () => { hud.toast(giveGift(state, id, g.key).msg); renderAlly(id); };
+      }
+    }
   }
 
   function renderCrewTab(state) {
@@ -466,7 +547,7 @@ export function initMenus(hud) {
   }
 
   return {
-    openShop, openSell, openInventory, openPause, openPhone, openNotice, openGameOver,
+    openShop, openSell, openAlly, openInventory, openPause, openPhone, openNotice, openGameOver,
     queueReport,
     closeAll,
     anyOpen: () => open !== null,

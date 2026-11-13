@@ -29,6 +29,8 @@ const CHUNK_ROWS = CONFIG.render.chunkRows;
 const WORLD_PX_W = CONFIG.world.cols * TS;
 const WORLD_PX_H = CONFIG.world.rows * TS;
 
+const ALLY_COLORS = { walt: '#7a8a4a', benny: '#c47a2a', june: '#c44a8a', rosa: '#f0f0f0' }; // M9 allies
+
 export function createRenderer(canvas) {
   const ctx = canvas.getContext('2d');
   ctx.imageSmoothingEnabled = false;
@@ -222,8 +224,8 @@ export function createRenderer(canvas) {
       const sx = Math.round(e.rx - cam.rx);
       if (sx < -16 || sx > W) continue;
       const feet = Math.round(e.y - cam.ry);
-      ctx.fillStyle = e.biker ? '#5a3a1e' : e.kind === 'goon' ? '#3a2e5a' : e.kind === 'saboteur' ? '#4a4a4a' : '#7a2e2e';
-      if (e.state === 'ko') ctx.fillRect(sx - 11, feet - 6, 22, 6);
+      ctx.fillStyle = e.kind === 'ally' ? ALLY_COLORS[e.ally] : e.biker ? '#5a3a1e' : e.kind === 'goon' ? '#3a2e5a' : e.kind === 'saboteur' ? '#4a4a4a' : '#7a2e2e';
+      if (e.state === 'ko' || e.state === 'downed') ctx.fillRect(sx - 11, feet - 6, 22, 6);
       else ctx.fillRect(sx - 6, feet - 22, 12, 22);
     }
     // Crew (M6): runners (blue), the guard (green), the gardener (olive).

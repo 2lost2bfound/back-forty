@@ -16,6 +16,7 @@ import { seedBagOf } from './plants.js';
 import { strainUnlocked } from './mastery.js';
 import { canBuyDog, giveDog, dogHurt, healDog } from '../entities/dog.js';
 import { buyTruce } from './threats.js';
+import { shopBlocked, priceMult } from './allies.js';
 import { dealerPrice, buyerPenalty, canTaper, startTaper, detox, useSubstance } from './addiction.js';
 import {
   addHeat, heatTier, noteSale, noteSpend, bribeDeputy, bribePrice, hireLawyer, rumorText,
@@ -45,10 +46,11 @@ export function shopStock(shopKey, state) {
   return E.stock[shopKey].filter((key) => !state || !seedStrain(key) || strainUnlocked(state, seedStrain(key))).map((key) => {
     const unreg = shopKey === 'alley' && E.unregStock.includes(key);
     const base = key === 'bribe' && state ? bribePrice(state) : E.prices[key];
+    const mult = state ? priceMult(state, shopKey, key) : 1; // June's discount / markup, Rosa's taper price (M9)
     return {
       key, name: CONFIG.itemNames[key], unreg,
       price: unreg ? Math.round(base * (1 + E.alleyGunMarkup))
-        : state && shopKey === 'alley' && (key === 'crank' || key === 'blues') ? dealerPrice(state, key) : base,
+        : state && shopKey === 'alley' && (key === 'crank' || key === 'blues') ? dealerPrice(state, key) : Math.round(base * mult),
       service: E.services.includes(key),
     };
   });
@@ -92,6 +94,8 @@ export function buyItem(state, key, shopKey = 'hardware') {
   const entry = shopStock(shopKey, state).find((e) => e.key === key);
   if (!entry) return { ok: false, msg: 'They don\'t stock that.' };
   if (!shopOpen(state.time, shopKey)) return { ok: false, msg: `${E[shopKey].label} is closed.` };
+  const blocked = shopBlocked(state, shopKey);
+  if (blocked) return { ok: false, msg: blocked };
   const p = state.player;
   if (seedStrain(key) && !strainUnlocked(state, seedStrain(key))) return { ok: false, msg: 'Those seeds are not on sale yet.' };
   if (key === 'bribe') return bribeDeputy(state);

@@ -11,6 +11,7 @@ import { stepCrew } from './crew.js';
 import { stepThreats } from './threats.js';
 import { recoverPlayer } from '../entities/combat.js';
 import { stepAddiction } from './addiction.js';
+import { stepAllies, reviving } from './allies.js';
 
 const SIM_DT = 1 / CONFIG.loop.simHz;
 const nowGh = (s) => s.time.day * 24 + s.time.hour;
@@ -27,6 +28,7 @@ export function stepSim(s, dtReal) {
   stepCrew(s, dtReal);
   stepThreats(s, dtReal);
   stepAddiction(s);
+  stepAllies(s, dtReal);
   const h = hs(s);
   if (s.threats.downed) { s.threats.downed = false; skipDays(s, 0); } // woke at the clinic
   if (h.pendingSkip > 0) {
@@ -34,13 +36,14 @@ export function stepSim(s, dtReal) {
     h.pendingSkip = 0;
     skipDays(s, days);
   }
-  if (s.player.downed && !h.jailed) recoverPlayer(s);
+  if (s.player.downed && !h.jailed && !reviving(s)) recoverPlayer(s);
 }
 
 /**
  * Lose `days` days (bail 1, jail 4): run the sim to the next 06:00, plus that
  * many whole days. Plants survive with a drip kit (owned or placed) or a
- * gardener on the crew (his tending runs inside stepSim); ally care is M9.
+ * gardener on the crew (his tending runs inside stepSim) or a 4-heart ally (allies.js
+ * waters and holds care at 0.7 while `jailed` is set).
  */
 export function skipDays(state, days) {
   const h = hs(state);

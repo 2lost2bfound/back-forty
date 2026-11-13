@@ -253,6 +253,9 @@ function processEvents() {
       case 'openShop':
         menus.openShop(state, ev.shop);
         break;
+      case 'openAlly':
+        menus.openAlly(state, ev.ally);
+        break;
       case 'openSell':
         menus.openSell(state, ev.buyer);
         break;

@@ -23,6 +23,7 @@ import { raycastSolid } from '../world/physics.js';
 import { damageEntity, enemyShoot, hurtPlayer, stepCops, groundY, HOSTILE_KINDS } from '../entities/combat.js';
 import { dogHomeX } from '../entities/dog.js';
 import { stressEvent } from './addiction.js';
+import { allyTargetNear, strikeAlly } from './allies.js';
 
 const TH = CONFIG.threats;
 const BI = TH.breakIn;
@@ -199,7 +200,7 @@ export function thiefTargets(state) {
     const found = (x, y) => {
       const r = roomOf(state, x, y);
       if (r.open) return true;
-      if (!cache.has(r.id)) cache.set(r.id, rng.chance(T.hatchFind));
+      if (!cache.has(r.id)) cache.set(r.id, rng.chance(T.hatchFind) || !!(state.allies && state.allies.hatchKnown)); // Benny sold the layout (M9)
       return cache.get(r.id);
     };
     const batches = [];
@@ -338,16 +339,23 @@ function think(state, e, dt) {
       break;
     }
     case 'fight': {
-      if (p.downed) { e.state = e.back || 'flee'; break; }
+      const al = allyTargetNear(state, e.x, T.pistolRangeTiles * TS, e.armed); // an ally on the lot draws the fight (M9)
+      if (p.downed && !al) { e.state = e.back || 'flee'; break; }
       const px = p.x + p.w / 2;
-      const d = Math.abs(px - e.x);
-      if (e.armed && d <= T.pistolRangeTiles * TS && hasLos(state, e, p)) {
-        if (e.cd <= 0) { e.cd = 1 / T.pistolRate; enemyShoot(state, { x: e.x, y: e.y }, T.pistolDmg, T.pistolAcc, 'thief'); }
+      const useAlly = !!al && (p.downed || Math.abs(al.x - e.x) < Math.abs(px - e.x));
+      const d = Math.abs((useAlly ? al.x : px) - e.x);
+      if (e.armed && d <= T.pistolRangeTiles * TS && (useAlly || hasLos(state, e, p))) {
+        if (e.cd <= 0) {
+          e.cd = 1 / T.pistolRate;
+          if (useAlly) strikeAlly(state, al, T.pistolDmg, T.pistolAcc, true);
+          else enemyShoot(state, { x: e.x, y: e.y }, T.pistolDmg, T.pistolAcc, 'thief');
+        }
       } else if (d > T.knifeReach) {
-        stepToward(e, px, dt, T.speed);
+        stepToward(e, useAlly ? al.x : px, dt, T.speed);
       } else if (e.cd <= 0) {
         e.cd = 1 / T.knifeRate;
-        hurtPlayer(state, T.knife, 'thief');
+        if (useAlly) strikeAlly(state, al, T.knife, 1, false);
+        else hurtPlayer(state, T.knife, 'thief');
       }
       break;
     }
@@ -680,13 +688,19 @@ function thinkGoon(state, e, dt) {
   let tgt = null;
   if (!p.downed && Math.abs(px - e.x) <= G.rangeTiles * TS && hasLos(state, e, p)) tgt = 'player';
   if (guard && Math.abs(guard.x - e.x) <= G.rangeTiles * TS && (!tgt || Math.abs(guard.x - e.x) < Math.abs(px - e.x))) tgt = 'guard';
+  const ally = allyTargetNear(state, e.x, G.rangeTiles * TS, true);
+  if (ally) {
+    const dTgt = tgt === 'player' ? Math.abs(px - e.x) : tgt === 'guard' ? Math.abs(guard.x - e.x) : Infinity;
+    if (Math.abs(ally.x - e.x) < dTgt) tgt = 'ally';
+  }
   if (tgt) { // stand and fight
     if (e.cd <= 0) {
       e.cd = 1 / G.rate;
       if (tgt === 'player') enemyShoot(state, { x: e.x, y: e.y }, G.dmg, G.acc, 'goon');
+      else if (tgt === 'ally') strikeAlly(state, ally, G.dmg, G.acc, true);
       else if (rivalRng(state, (r) => r.chance(G.acc))) guard.hp -= G.dmg;
     }
-    e.dir = Math.sign((tgt === 'player' ? px : guard.x) - e.x) || e.dir;
+    e.dir = Math.sign((tgt === 'player' ? px : tgt === 'ally' ? ally.x : guard.x) - e.x) || e.dir;
   } else if (e.state === 'seek') {
     if (e.potId === null) {
       e.potId = e.squad.smashed >= G.maxPots ? 0 : (e.squad.queue.shift() || 0);

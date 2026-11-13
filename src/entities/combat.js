@@ -14,6 +14,7 @@ import { raycastSolid } from '../world/physics.js';
 import { noiseMult, nightKey } from '../sim/time.js';
 import { maxHp, damageMult } from '../sim/addiction.js';
 import { heatEvent, hs, arrestPlayer, payFine } from '../sim/heat.js';
+import { beginPlayerRevive } from '../sim/allies.js';
 
 const W = CONFIG.weapons;
 const C = CONFIG.combat;
@@ -385,12 +386,19 @@ export function hurtPlayer(state, dmg, src) {
   if (p.hp > 0) return;
   p.downed = true;
   p.heal = 0;
-  const t = threats(state);
   if (src === 'cop') {
     arrestPlayer(state, 'police');
     state.events.push({ type: 'notice', title: 'Shot down', lines: ['The police put you down and cuff you.'] });
     return;
   }
+  if (beginPlayerRevive(state)) return; // Rosa may reach you in time
+  sendToClinic(state);
+}
+
+/** The downed-player penalty: 30% of cash, the bill, bigger hauls for thieves; you wake at the clinic. */
+export function sendToClinic(state) {
+  const p = state.player;
+  const t = threats(state);
   const D = C.downed;
   const loss = p.cash * D.cashLoss;
   p.cash -= loss;

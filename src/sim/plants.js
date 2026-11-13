@@ -324,7 +324,7 @@ export function stepPlants(state, gh) {
     plant.healthSum += plant.health * gh;
     if (stressors.length === 0) {
       plant.careTicks += plant.gardened
-        ? Math.min(gh, Math.max(0, CONFIG.crew.gardener.careCap * (plant.ticks + gh) - plant.careTicks))
+        ? Math.min(gh, Math.max(0, (plant.careCap || CONFIG.crew.gardener.careCap) * (plant.ticks + gh) - plant.careTicks))
         : gh;
     }
     plant.ticks += gh;

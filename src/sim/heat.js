@@ -213,7 +213,7 @@ export function searchLot(state, rng) {
   };
   const found = { plants: [], batches: [], containers: [], carried: false };
   for (const plant of state.plants) {
-    if (plant.dead) continue;
+    if (plant.dead || plant.away) continue; // away: Benny drove the pot off (M9)
     const pot = state.objects.find((o) => o.id === plant.potId);
     if (pot && roomFound(pot.x, pot.y)) found.plants.push(plant);
   }

@@ -14,3 +14,4 @@ import './threats.test.js';
 import './crew.test.js';
 import './genetics.test.js';
 import './addiction.test.js';
+import './allies.test.js';

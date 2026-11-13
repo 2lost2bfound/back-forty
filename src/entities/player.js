@@ -27,6 +27,7 @@ import * as economy from '../sim/economy.js';
 import { pedNear } from './npc.js';
 import { isWeapon, attack, startReload, useBandage } from './combat.js';
 import { tendMult, tiredImmune, moveMult, staminaMult, rollFumble, useSubstance } from '../sim/addiction.js';
+import * as allies from '../sim/allies.js';
 import { installLock, canPlaceCamera, waterPoisoned, purgeWater, installBarrelLock } from '../sim/threats.js';
 
 const TS = CONFIG.world.tile;
@@ -141,6 +142,11 @@ export function actionDuration(state, base) {
 /** Advance the player one fixed 1/60 s physics step. */
 export function stepPlayer(state, inp, dt) {
   const p = state.player;
+  if (p.downed) { // down and waiting for Rosa (M9): no control at all
+    p.action = null;
+    inp = { ...inp, left: false, right: false, up: false, down: false, sprint: false, digHeld: false,
+      jumpPressed: false, tendPressed: false, placePressed: false, interactPressed: false };
+  }
   // Compulsion: the player loses control for a moment (plan §A12).
   if (p.locS > 0) {
     p.locS -= dt;
@@ -320,6 +326,9 @@ function completeAction(state, a) {
       state.events.push({ type: 'action', name: 'snip' });
       break;
     }
+    case 'revive':
+      allies.reviveAlly(state, a.entId);
+      break;
     case 'harvest': {
       if (!plant || plant.dead) return;
       if (!plants.canHarvest(plant)) return;
@@ -595,6 +604,10 @@ export function interactTarget(state) {
     const sb = CONFIG.world.buildings.find((b) => b.key === 'shack');
     consider({ kind: 'door' }, sb.x + sb.w - 1, state.surface[sb.x + sb.w - 1] - 1);
   }
+  // Allies at their town spots, the park flowers, and a downed ally to revive (M9).
+  for (const al of allies.spotsNow(state)) consider({ kind: 'ally', id: al.id }, al.x, state.surface[al.x] - 1);
+  if (allies.canPickFlowers(state)) consider({ kind: 'flowers' }, CONFIG.allies.flowers.x, state.surface[CONFIG.allies.flowers.x] - 1);
+  for (const e of state.entities || []) if (e.kind === 'ally' && e.state === 'downed') consider({ kind: 'downedAlly', ent: e }, e.x / TS - 0.5, pcy);
   // Buyers standing at their spot, and pedestrians (street sales).
   for (const key of economy.BUYER_KEYS) {
     if (!economy.buyerPresent(state, key)) continue;
@@ -644,6 +657,9 @@ export function interactHint(state) {
       return o ? `E: Deliver ${nm}'s order (${Math.round(o.grams)} g)` : `E: Talk to ${nm}`;
     }
     case 'ped': return 'E: Offer a stranger some product';
+    case 'ally': return `E: Talk to ${CONFIG.allies.defs[t.id].name}`;
+    case 'flowers': return 'E: Pick flowers';
+    case 'downedAlly': return `E: Help ${CONFIG.allies.defs[t.ent.ally].name} up (${CONFIG.allies.downed.reviveS} s)`;
     case 'door': return 'E: Fit a lock to the door';
     case 'lamp': return `E: Lamp timer ${t.obj.hours} h (switch to ${t.obj.hours === CONFIG.lamps.hoursNormal ? CONFIG.lamps.hoursLong : CONFIG.lamps.hoursNormal} h)`;
     case 'stash': case 'safe': return `E: Use the ${t.kind} (put in / take out)`;
@@ -719,7 +735,9 @@ export function handleInteract(state) {
       break;
     }
     case 'shop':
-      if (economy.shopOpen(state.time, t.shop)) {
+      if (economy.shopOpen(state.time, t.shop) && allies.shopBlocked(state, t.shop)) {
+        state.events.push({ type: 'toast', msg: allies.shopBlocked(state, t.shop) });
+      } else if (economy.shopOpen(state.time, t.shop)) {
         state.events.push({ type: 'openShop', shop: t.shop });
       } else {
         const sh = CONFIG.economy[t.shop];
@@ -743,6 +761,16 @@ export function handleInteract(state) {
       state.events.push({ type: 'toast', msg: r.msg });
       break;
     }
+    case 'ally':
+      allies.talkTo(state, t.id);
+      state.events.push({ type: 'openAlly', ally: t.id });
+      break;
+    case 'flowers':
+      state.events.push({ type: 'toast', msg: allies.pickFlowers(state).msg });
+      break;
+    case 'downedAlly':
+      p.action = { kind: 'revive', t: 0, dur: CONFIG.allies.downed.reviveS, entId: t.ent.id };
+      break;
     case 'ped': {
       const r = economy.streetSale(state, t.ped);
       state.events.push({ type: 'toast', msg: r.ok ? `Sold ${r.grams} g for $${Math.round(r.value)}.` : r.msg });

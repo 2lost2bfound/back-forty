@@ -18,6 +18,7 @@ import { initThreats } from './sim/threats.js';
 import { initCrew } from './sim/crew.js';
 import { initGenetics } from './sim/genetics.js';
 import { initAddiction } from './sim/addiction.js';
+import { initAllies } from './sim/allies.js';
 
 export const SAVE_PREFIX = 'backforty';
 export const slotKey = (n) => `${SAVE_PREFIX}.slot${n}`;
@@ -55,6 +56,7 @@ export function newGame(seed) {
     crew: initCrew(seed),       // candidates and hired help (saved)
     genetics: initGenetics(seed), // clone-drift PRNG stream (saved)
     addiction: initAddiction(seed), // dependence, buffs, recovery, own PRNG (saved)
+    allies: initAllies(seed),   // friendship, favors, hospital/jail, own PRNG (saved)
     entities: [],               // runtime: thieves/bikers
     bullets: [],                // runtime: the player's pooled bullets
     gameOver: null,             // { reason } once a lose condition fires
@@ -191,6 +193,7 @@ export function serializeState(state) {
     crew: state.crew,
     genetics: state.genetics,
     addiction: state.addiction,
+    allies: state.allies,
     gameOver: state.gameOver,
   });
 }
@@ -237,6 +240,7 @@ export function deserializeState(json) {
     crew: o.crew || initCrew(o.seed),
     genetics: o.genetics || initGenetics(o.seed),
     addiction: o.addiction || initAddiction(o.seed),
+    allies: o.allies || initAllies(o.seed),
     entities: [],
     bullets: [],
     gameOver: o.gameOver || null,

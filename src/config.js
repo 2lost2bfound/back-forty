@@ -381,6 +381,7 @@ export const CONFIG = {
       drink: 5, rumor: 20, ask_around: 50, crank: 30, blues: 20,
       heal: 100, vet: 150, detox: 1500, taper: 100,
       lawyer: 200, permit: 3000, bribe: 500,
+      whiskey: 30, beer: 6, coffee: 4, bike_parts: 30,   // ally gifts (M9)
     },
     doses: { nutrients: 10, phkit: 10 },  // a bottle/kit contains this many doses
     // Items bought in packs: inventory units granted per purchase.
@@ -393,12 +394,12 @@ export const CONFIG = {
         'moisture_meter', 'ph_meter', 'loupe', 'rack', 'neem', 'lamp_cfl', 'lamp_hps',
         'lamp_led', 'drip', 'filter', 'generator', 'wood', 'concrete_tile',
         'ladder', 'door', 'padlock', 'deadbolt', 'steeldoor', 'hatch', 'stash', 'tripwire', 'floodlight', 'camera',
-        'pickaxe', 'cart', 'bicycle', 'duffel', 'barrel_lock'],
+        'pickaxe', 'cart', 'bicycle', 'duffel', 'barrel_lock', 'coffee', 'bike_parts'],
       pawn: ['bat', 'pistol22', 'pistol9', 'shotgun', 'rifle', 'ammo_22', 'ammo_9',
         'ammo_shell', 'ammo_rifle', 'scanner', 'safe', 'bandage'],
       walt: ['dog'],
       alley: ['crank', 'blues', 'pistol22', 'pistol9', 'shotgun', 'rifle', 'suppressor'],
-      bar: ['drink', 'rumor', 'ask_around', 'bribe', 'truce'],
+      bar: ['drink', 'rumor', 'ask_around', 'bribe', 'truce', 'beer', 'whiskey'],
       clinic: ['heal', 'vet', 'detox', 'taper'],
       townhall: ['lawyer', 'permit'],
     },
@@ -595,6 +596,7 @@ export const CONFIG = {
     crank: 'Crank', blues: 'Blues', drink: 'Drink', rumor: 'Rumor', bribe: 'Bribe the deputy', ask_around: 'Ask around for buyers',
     heal: 'Full heal', vet: 'Vet', detox: 'Detox', taper: 'Taper kit (1 day)',
     lawyer: 'Lawyer retainer (1 day)', permit: 'Farm-stand permit', truce: 'Truce with Dale',
+    whiskey: 'Whiskey', beer: 'Beer', coffee: 'Coffee', bike_parts: 'Bicycle parts', flowers: 'Flowers', package: 'Package',
   },
 
   // Addiction (plan §A12). Three substances plus smoking your own product.
@@ -628,6 +630,57 @@ export const CONFIG = {
     detox: { setTo: 15, days: 3 },
     recovery: { days: 14, relapseSnap: 0.75, cleanSnap: 0.5, cravingGh: 2, cravingTendMult: 1.25 },
     desaturate: 'saturate(0.35)',           // CSS filter on the canvas while in withdrawal
+  },
+
+  // Friends and allies (plan §A13). Friendship is 0-100 points, 20 per heart.
+  // Seconds are real sim seconds (1 gh = 30 s); times in gh unless named days.
+  allies: {
+    ptsPerHeart: 20, maxPts: 100, max: 2,          // max allies on the lot at once
+    callMinHearts: 2, callBase: 6, callSecondsPerHeart: 20, nightExtraS: 20, // (6 - hearts) x 20 s, +20 s at night
+    cooldownDays: 2, autoHearts: 4, autoKinds: ['camera', 'dog'], coverHearts: 4, coverCareCap: 0.7, // 4+ hearts respond / cover
+    spawnOffsetTiles: 2,                           // they arrive this far inside the lot's road edge
+    followTiles: 10, aggroTiles: 30, retreatFrac: 0.25, fightEndS: 8, idleLeaveS: 60, reach: 20,
+    witnessTiles: 10,                              // an ally this close sees you use a hard drug
+    gains: {
+      favor: 12, favorHeat: -1, loved: 8, liked: 5, neutral: 1, disliked: -3, drink: 3,
+      fought: 10, paidBill: 15, unpaidBill: -20, bail: 15, leftInJail: -40,
+      hardDrug: -3, killedOthers: -10, noContact: -2, loanLend: 15, loanRefuse: -15,
+    },
+    noContactDays: 5,                              // -2 per day after this many days
+    drinkPrice: 5,
+    favors: {
+      everyDays: 3, kinds: ['fetch', 'deliver', 'walk', 'fence'], fenceWood: 6, reachTiles: 3,
+      fetch: { walt: 'ammo_rifle', benny: 'pot', june: 'neem', rosa: 'bandage' },
+    },
+    gift: { wood: 10, budGrams: 5, budQuality: 60 },
+    estrange: { from: 60, below: 20, winBack: 20 },
+    downed: { windowS: 60, reviveS: 5, reviveHp: 30, killChance: 0.10, hospitalDays: 3, bill: 400, reviveReachTiles: 2, playerWaitS: 30 },
+    arrest: { chance: 0.5, bail: 600, days: 6, windowGh: 24 },
+    grief: { days: 3, tendMult: 1.1 },
+    loan: { afterDay: 15, amount: 1000, repayDays: 10, repayChance: 0.7 },
+    perks: { warnHearts: 3, discountHearts: 3, discount: 0.15, taperHearts: 3, taperMult: 0.5, sponsorHearts: 3,
+      hideHearts: 5, hidePots: 4, hideGh: 12 },
+    hostileAct: {                                  // the one hostile thing an estranged ally does
+      walt: { heat: 15 },
+      benny: { breakInDays: 5 },                   // reuses the crew sell-out break-in bonus (+15%), and the hatch is found 100% next time
+      june: { banDays: 5, priceMult: 1.2, priceDays: 10 },
+      rosa: { refuseDays: 10 },
+    },
+    flowers: { x: 262, perDay: 1 },                // park pickup tile
+    defs: {
+      walt: { name: 'Walt', hp: 90, weapon: 'rifle', dmg: 40, acc: 0.8, rate: 0.7, rangeTiles: 24, speed: 70, armed: true,
+        spot: { x: 181, open: 6, close: 20 }, home: 200, deliverTo: 254,
+        loved: ['whiskey'], liked: ['wood'], disliked: ['crank', 'blues'] },
+      benny: { name: 'Benny', hp: 130, weapon: 'bat', dmg: 18, acc: 0.9, rate: 2, rangeTiles: 1.75, speed: 120, armed: false, melee: true,
+        spot: { x: 232, open: 9, close: 18 }, home: 228, deliverTo: 181,
+        loved: ['beer'], liked: ['bike_parts'], disliked: [] },
+      june: { name: 'June', hp: 70, weapon: 'shotgun', dmg: 54, acc: 0.6, rate: 1, rangeTiles: 9, speed: 90, armed: true,
+        spot: { x: 254, open: 8, close: 18 }, home: 270, deliverTo: 309,
+        loved: ['bud'], liked: ['coffee'], disliked: [] },
+      rosa: { name: 'Rosa', hp: 60, weapon: null, speed: 90, armed: false, heals: true, healHps: 5, healTiles: 3,
+        spot: { x: 309, open: 8, close: 18 }, home: 300, deliverTo: 232,
+        loved: ['flowers'], liked: ['coffee'], disliked: ['blues'] },
+    },
   },
 
   // Headless balance bot policy (tools/balance.js, My Addition 11).
