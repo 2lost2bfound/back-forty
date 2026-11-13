@@ -5,6 +5,7 @@
 
 import { CONFIG } from '../config.js';
 import { stageOf, stressorsOf, avgHealthOf, careOf, litHoursToRipe } from '../sim/plants.js';
+import { scannerView, heatTier, hs, payDebt } from '../sim/heat.js';
 import {
   shopStock, shopOpen, buyItem, orderOf, fillQuote, fillOrder, nowGh, payFee,
   buyerLevel, buyerMult, BUYER_KEYS, carriedGrams, carryCap,
@@ -43,10 +44,11 @@ export function initMenus(hud) {
   const pausePanel = makePanel('pause');
   const reportPanel = makePanel('report');
   const phonePanel = makePanel('phone');
+  const noticePanel = makePanel('notice');
 
   function closeAll() {
     open = null;
-    for (const p of [shopPanel, sellPanel, invPanel, pausePanel, reportPanel, phonePanel]) {
+    for (const p of [shopPanel, sellPanel, invPanel, pausePanel, reportPanel, phonePanel, noticePanel]) {
       p.panel.style.display = 'none';
     }
   }
@@ -76,7 +78,7 @@ export function initMenus(hud) {
     if (!shopOpen(state.time, shopKey)) {
       el('div', 'menu-note', shopPanel.body, `Closed. Open ${hrs(sh.open)}-${hrs(sh.close)}.`);
     }
-    for (const item of shopStock(shopKey)) {
+    for (const item of shopStock(shopKey, state)) {
       const row = el('div', 'menu-row', shopPanel.body);
       el('span', 'menu-item-name', row, item.name + (item.unreg ? ' (unregistered)' : ''));
       el('span', 'menu-item-price', row, `$${item.price}`);
@@ -138,12 +140,12 @@ export function initMenus(hud) {
     const eco = state.economy;
     phonePanel.body.textContent = '';
     const tabs = el('div', 'menu-row', phonePanel.body);
-    for (const t of ['orders', 'contacts', 'ledger']) {
+    for (const t of ['orders', 'contacts', 'ledger', 'heat']) {
       const b = el('button', 'menu-btn', tabs, t === phoneTab ? `[${t}]` : t);
       b.onclick = () => { phoneTab = t; renderPhone(); };
     }
     el('div', 'menu-note', phonePanel.body,
-      `Cash $${Math.round(state.player.cash)} · Carrying ${carriedGrams(state).toFixed(0)}/${carryCap(state)} g · Heat ${state.heat.toFixed(0)} · Gross $${Math.round(eco.gross)}`);
+      `Cash $${Math.round(state.player.cash)} · Carrying ${carriedGrams(state).toFixed(0)}/${carryCap(state)} g · Heat ${TIER_NAMES[heatTier(state.heat)]} · Gross $${Math.round(eco.gross)}`);
     if (phoneTab === 'orders') {
       if (eco.orders.length === 0) el('div', 'menu-note', phonePanel.body, 'No open orders.');
       for (const o of eco.orders) {
@@ -156,6 +158,25 @@ export function initMenus(hud) {
         const row = el('div', 'menu-row', phonePanel.body, `A biker wants $${f.amount}.`);
         const b = el('button', 'menu-btn', row, 'Pay');
         b.onclick = () => { hud.toast(payFee(state).msg); renderPhone(); };
+      }
+    } else if (phoneTab === 'heat') {
+      const v = scannerView(state);
+      if (!v) {
+        el('div', 'menu-note', phonePanel.body, `Heat: ${TIER_NAMES[heatTier(state.heat)]}. Buy a police scanner ($250, pawn shop) for the exact number.`);
+      } else {
+        el('div', 'menu-note', phonePanel.body, `Heat ${v.value.toFixed(1)} (${TIER_NAMES[v.tier]}) · raid chance tonight ${(v.raidChance * 100).toFixed(0)}%`);
+        if (v.log.length === 0) el('div', 'menu-note', phonePanel.body, 'No changes yet today.');
+        for (const e of v.log) {
+          el('div', 'menu-row', phonePanel.body, `${e.amount > 0 ? '+' : ''}${e.amount}  ${e.label}`);
+        }
+      }
+      const hst = hs(state);
+      el('div', 'menu-note', phonePanel.body,
+        `Debt $${Math.round(state.player.debt || 0)} · Arrests ${state.player.arrests || 0}/${CONFIG.heat.raid.maxArrests}` +
+        `${nowGh(state) < hst.lawyerUntil ? ' · Lawyer retained' : ''}`);
+      if (state.player.debt > 0) {
+        const b = el('button', 'menu-btn', phonePanel.body, 'Pay debt');
+        b.onclick = () => { hud.toast(`Paid $${Math.round(payDebt(state))} of your debt.`); renderPhone(); };
       }
     } else if (phoneTab === 'contacts') {
       for (const key of BUYER_KEYS) {
@@ -173,6 +194,34 @@ export function initMenus(hud) {
           `Day ${e.day} ${e.hour}:00  ${e.text}${e.amount ? `  ${e.amount > 0 ? '+' : '-'}$${Math.abs(Math.round(e.amount))}` : ''}`);
       }
     }
+  }
+
+  // ----------------------------------------------- notices, game over -----
+  // Raid/patrol/arrest reports and the Prison game over. Notices pause the
+  // sim until dismissed; game over offers "Load last autosave" (plan §A15).
+
+  const noticeQueue = [];
+  function openNotice(title, lines) {
+    noticeQueue.push({ title, lines });
+    if (open !== 'notice') showNextNotice();
+  }
+  function showNextNotice() {
+    const n = noticeQueue.shift();
+    if (!n) { closeAll(); return; }
+    noticePanel.body.textContent = '';
+    for (const l of n.lines) el('div', 'menu-report-line', noticePanel.body, l);
+    const row = el('div', 'menu-row', noticePanel.body);
+    el('button', 'menu-btn', row, 'OK').onclick = () => showNextNotice();
+    show(noticePanel, n.title, 'notice');
+  }
+  function openGameOver(reason) {
+    noticePanel.body.textContent = '';
+    el('div', 'menu-report-line', noticePanel.body,
+      reason === 'prison' ? 'Third arrest. The judge is not feeling generous.' : 'Game over.');
+    const row = el('div', 'menu-row', noticePanel.body);
+    el('button', 'menu-btn', row, 'Load last autosave').onclick = () =>
+      window.dispatchEvent(new CustomEvent('backforty:loadauto'));
+    show(noticePanel, 'GAME OVER', 'gameover');
   }
 
   // -------------------------------------------------------- inventory ----
@@ -288,7 +337,7 @@ export function initMenus(hud) {
   }
 
   return {
-    openShop, openSell, openInventory, openPause, openPhone,
+    openShop, openSell, openInventory, openPause, openPhone, openNotice, openGameOver,
     queueReport,
     closeAll,
     anyOpen: () => open !== null,
@@ -296,6 +345,8 @@ export function initMenus(hud) {
     tick,
   };
 }
+
+const TIER_NAMES = ['Cold', 'Warm', 'Hot', 'Burning'];
 
 function moistureBand(m) {
   const P = CONFIG.plants; // bands derive from the ideal/stress ranges

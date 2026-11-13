@@ -15,6 +15,18 @@ export function stepNpcs(state, dt) {
     if (n.x < PED.x0 * TS) { n.x = PED.x0 * TS; n.dir = 1; }
     else if (n.x > PED.x1 * TS) { n.x = PED.x1 * TS; n.dir = -1; }
   }
+  // Patrol cops pace the town; the patrol car drives across the road (M4).
+  const P = CONFIG.heat.patrol;
+  for (const c of state.cops || []) {
+    c.x += c.dir * P.speed * dt;
+    if (c.x < P.x0 * TS) { c.x = P.x0 * TS; c.dir = 1; }
+    else if (c.x > P.x1 * TS) { c.x = P.x1 * TS; c.dir = -1; }
+  }
+  const car = state.patrolCar;
+  if (car) {
+    car.x += car.dir * CONFIG.heat.tells.carSpeed * dt;
+    if (car.x > CONFIG.world.zones.roadX1 * TS) state.patrolCar = null;
+  }
 }
 
 /** Nearest pedestrian within interact reach of the player, or null. */

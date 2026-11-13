@@ -166,7 +166,96 @@ export const CONFIG = {
 
   // Weather roll at 06:00 (plan §A3). M2 rolls the field only; rain and
   // heatwave effects on plants arrive with M4.
-  weather: { rainChance: 0.2, heatwaveChance: 0.1 },
+  weather: {
+    rainChance: 0.2, heatwaveChance: 0.1,
+    rollHour: 6,             // the roll happens at 06:00 (plan §A3)
+    rainDurationGh: 6,       // rain runs 06:00-12:00 on a rain day
+    rainMoistureGh: 4,       // outdoor plants +4 moisture per gh in rain
+    rainBarrelPerGh: 8,      // rain refills the barrel (pours per gh)...
+    barrelMax: 80,           // ...up to this many
+    heatwaveMoistureMult: 1.5, // outdoor moisture loss x1.5 in the sun window
+    rainNoiseMult: 0.7,      // footstep/gunshot noise radius -30% (used by M5)
+    rainParticles: 80,       // rain streaks inside the 150-particle budget
+  },
+
+  // Lamps (plan §A4 Light). Pots = how many nearest pots one lamp lights,
+  // radius in tiles, factor = light multiplier, heat = per day on a 14 h timer.
+  lamps: {
+    onHour: 6,               // timers start at 06:00 (same dawn as the sun)
+    hoursNormal: 14, hoursLong: 18, longHeatMult: 2,
+    types: {
+      lamp_cfl: { pots: 2, radius: 2, factor: 0.7, heat: 0.10 },
+      lamp_hps: { pots: 4, radius: 3, factor: 1.0, heat: 0.40 },
+      lamp_led: { pots: 4, radius: 3, factor: 1.1, heat: 0.15 },
+    },
+  },
+
+  // Heat (plan §A5). Heat is 0-100 with a floor it can never drop below.
+  heat: {
+    floorStart: 0,
+    decay: { low: 2, high: 1 },          // per day: Cold/Warm, Hot/Burning
+    layLowMult: 2,                       // a day with zero sales doubles decay
+    farmStandDecay: 1,                   // extra per day with a farm-stand front (M10 sets it)
+    visiblePlant: 0.3,                   // per plant visible from the road, per day
+    smell: { indoor: 0.2, outdoor: 0.1, rack: 0.5 }, // flowering/drying, unfiltered, per day
+    filterRadius: 6,                     // tiles; carbon filter removes smell heat
+    bigGrow: [{ over: 30, heat: 3 }, { over: 12, heat: 1 }], // first match wins
+    flashy: { limit: 2000, heat: 3 },    // dirty cash spent in one day
+    // One-off sources other milestones call through heatEvent(state, key).
+    events: {
+      runnerBusted: 10, runnerSnitch: 20, patrolStop: 10,
+      killCriminal: 8, killCivilian: 40, collapse: 5, rivalTip: 15, favor: -1,
+      shootOfficer: 50,
+      gunshotLot: { per: 1, max: 8, suppressed: 0.25 },
+      gunshotTown: { per: 4, max: 20, suppressed: 4 },
+    },
+    shootOfficerFloor: 25,               // heatFloor +25 permanently
+    runnerDelivery: { base: 0.5, disc: 1.5 }, // 0.5 x (1.5 - Discretion/100)
+    bribe: { minDay: 6, amount: 15, cost: 500, costStep: 250, cooldownDays: 5 },
+    afterRaid: { found: 30, nothing: 40 },
+    raid: {
+      minDay: 6,                         // no raids before day 6 (plan §A3)
+      rollHour: 5, warnHour: 3, tipHour: 23, tipWindowDays: 5,
+      hot: { from: 50, perPoint: 0.012 },
+      burning: { from: 75, base: 0.30, perPoint: 0.028 },
+      lawyerChanceMult: 0.75,
+      copsHot: 4, copsBurning: 6,
+      arriveGh: 0.5,                     // van parks, cops walk to the lot
+      hatch: { base: 0.30, heatFrom: 50, perHeat: 0.01, k9: 0.20, snitch: 0.30 },
+      k9FromHeat: 75,                    // K-9 unit joins at Burning
+      safeOpen: 0.5, stashFind: 0.10,
+      cashSeize: 0.5, finePerPlant: 50,
+      arrestPlants: 20, arrestGrams: 450,
+      lawyerThresholdMult: 1.5, lawyerFineMult: 0.5,
+      bail: [1500, 3000], bailDays: 1, jailDays: 4, maxArrests: 3,
+    },
+    patrol: {                            // town stops (plan §A5)
+      hours: { from: 8, to: 20 },
+      copsBurning: 2, copsOther: 1,
+      speed: 20,                         // px/s along the town strip
+      x0: 225, x1: 395,
+      minGrams: 100, rangeTiles: 6,
+      chance: [0.02, 0.06, 0.15, 0.30],  // Cold, Warm, Hot, Burning
+      duffelMult: 1.5, coolGh: 6,
+      fine: 200, arrestGrams: 448,
+    },
+    tells: {
+      carPerDay: [0, 1, 3, 3],           // patrol car passes the road, by tier
+      carHours: [14, 9, 18],             // pass times (first N used)
+      carSpeed: 60,                      // px/s
+      helicopterHour: 20.5,              // Hot and above
+      unmarkedCarX: 150,                 // parked across the road (Burning)
+    },
+    rumor: [                             // (max chance, words)
+      [0, 'Nothing is stirring tonight.'],
+      [0.15, 'Could be a quiet night.'],
+      [0.40, 'The deputy looked jumpy.'],
+      [0.70, 'Word is they are coming soon.'],
+      [1.01, 'They are coming tonight. Bet on it.'],
+    ],
+    peopleTalking: 'The bartender mutters: "People are talking."',
+    logMax: 60,
+  },
 
   // Grower mastery constants (plan §A10). mastery.js itself is M7; the harvest
   // formula already references the player level, so the per-level deltas live
@@ -214,7 +303,8 @@ export const CONFIG = {
     nutrientIdeal:  { lo: 40, hi: 80 },
     nutrientStress: { lo: 20, hi: 90 },
     // Stress damage per gh per stressor, before the resilience multiplier.
-    stressDamage: { moisture: 3, phMild: 1, phSevere: 3, nutrientLow: 1.5, nutrientHigh: 2.5 },
+    stressDamage: { moisture: 3, phMild: 1, phSevere: 3, nutrientLow: 1.5, nutrientHigh: 2.5, noLight: 2 },
+    darkStressGh: 24,      // indoor plant with no light this long takes stress
     healthRegen: 1,        // +1 health per gh with zero stressors
     dieAtZeroMoistureGh: 6,// at moisture 0 for 6 gh straight the plant dies
     // Stages: progress shares and the ripe/overripe wall-clock windows.
@@ -260,7 +350,7 @@ export const CONFIG = {
       scanner: 250, safe: 500, bandage: 20, suppressor: 900,
       drink: 5, rumor: 20, ask_around: 50,
       heal: 100, vet: 150, detox: 1500, taper: 100,
-      lawyer: 200, permit: 3000,
+      lawyer: 200, permit: 3000, bribe: 500,
     },
     doses: { nutrients: 10, phkit: 10 },  // a bottle/kit contains this many doses
     // Items bought in packs: inventory units granted per purchase.
@@ -277,12 +367,12 @@ export const CONFIG = {
       pawn: ['bat', 'pistol22', 'pistol9', 'shotgun', 'rifle', 'ammo_22', 'ammo_9',
         'ammo_shell', 'ammo_rifle', 'scanner', 'safe', 'bandage'],
       alley: ['pistol22', 'pistol9', 'shotgun', 'rifle', 'suppressor'],
-      bar: ['drink', 'rumor', 'ask_around'],
+      bar: ['drink', 'rumor', 'ask_around', 'bribe'],
       clinic: ['heal', 'vet', 'detox', 'taper'],
       townhall: ['lawyer', 'permit'],
     },
     unregStock: ['pistol22', 'pistol9', 'shotgun', 'rifle'],
-    services: ['drink', 'rumor', 'ask_around', 'heal', 'vet', 'detox', 'taper', 'lawyer', 'permit'],
+    services: ['drink', 'rumor', 'ask_around', 'bribe', 'heal', 'vet', 'detox', 'taper', 'lawyer', 'permit'],
 
     // Carry limits (plan §A5 patrol stops): grams of product on you.
     carry: { backpack: 500, duffel: 2000 },
@@ -365,7 +455,7 @@ export const CONFIG = {
     shotgun: 'Pump shotgun', rifle: 'Hunting rifle', ammo_22: '.22 rounds',
     ammo_9: '9 mm rounds', ammo_shell: 'Shotgun shells', ammo_rifle: 'Rifle rounds',
     scanner: 'Police scanner', safe: 'Safe', bandage: 'Bandage', suppressor: 'Suppressor',
-    drink: 'Drink', rumor: 'Rumor', ask_around: 'Ask around for buyers',
+    drink: 'Drink', rumor: 'Rumor', bribe: 'Bribe the deputy', ask_around: 'Ask around for buyers',
     heal: 'Full heal', vet: 'Vet', detox: 'Detox', taper: 'Taper kit (1 day)',
     lawyer: 'Lawyer retainer (1 day)', permit: 'Farm-stand permit',
   },
@@ -382,6 +472,16 @@ export const CONFIG = {
     townFrom: 7, townTo: 22,
     partialWithinGh: 8,    // deliver half an order when the deadline is this close
     streetPerDay: 10, streetKeep: 20, streetReserveMult: 1.2,
+    // Heat-aware policy (M4): hide the grow underground, stay quiet.
+    streetMaxHeat: 20,       // street sales only below this heat
+    bribeAt: 40,             // bribe the deputy at/above this heat (after day 6)
+    outdoorCap: 12,          // plants grown outdoors before the room exists
+    roomCost: 1100,          // cash needed to dig the room (hatch + first lamps + filter)
+    roomX0: 60, roomWidth: 44, roomTop: 6, roomRows: 3, // tiles below the surface
+    shaftX: 58,              // the shaft (and its hatch) sits just outside the shack
+    maxGroups: 7,            // 4 pots + 1 HPS lamp per group (28 plants, under the 30 line)
+    generatorAtGroups: 3,    // buy the generator (no lamp heat) from this many groups
+    filterEveryGroups: 2,    // one carbon filter per this many groups
   },
 
   // Rendering (plan §B7).
@@ -392,6 +492,8 @@ export const CONFIG = {
     maxChunkRedrawsPerFrame: 2,
     cameraLagS: 0.15,      // follow lag (plan §B7)
     atlasSize: 512,
+    // Darkness layer (M4): quarter-res, lamps punched out.
+    lighting: { scale: 4, undergroundTint: 'rgba(6,8,16,0.55)', playerGlowTiles: 3, lampRadiusTiles: 4 },
     skyTop: '#6fb0dd',     // fixed noon gradient for M1 (clock arrives in M2)
     skyBottom: '#cfe8f7',
     hills: {

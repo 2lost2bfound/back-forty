@@ -3,11 +3,13 @@
 // checks; the frame loop never touches the DOM directly. Browser-only module.
 
 import { CONFIG } from '../config.js';
-import { formatClock } from '../sim/time.js';
+import { formatClock, weatherNow } from '../sim/time.js';
+import { heatTier } from '../sim/heat.js';
 import { nowGh } from '../sim/economy.js';
 import { tileInfo, itemKeyFor } from '../world/tiles.js';
 
 const U = CONFIG.ui;
+const HEAT_NAMES = ['COLD', 'WARM', 'HOT', 'BURNING'];
 
 function el(tag, cls, parent) {
   const e = document.createElement(tag);
@@ -43,6 +45,11 @@ export function initHud() {
     slots.push({ slot, name, count });
   }
 
+  // Heat meter (plan §A5): tier colour always; the exact number needs a scanner.
+  const heatOuter = el('div', 'hud-bar-outer hud-heat', barWrap);
+  const heatFill = el('div', 'hud-bar-fill heat', heatOuter);
+  const heatLabel = el('span', 'hud-bar-label', heatOuter);
+
   const promptEl = el('div', 'hud-prompt', root);
 
   const toasts = el('div', 'hud-toasts', root);
@@ -70,7 +77,8 @@ export function initHud() {
   return {
     /** Called at ui.updateHz from the frame loop. */
     update(state, hint) {
-      const weather = state.time.weather[0].toUpperCase() + state.time.weather.slice(1);
+      const w0 = weatherNow(state);
+      const weather = w0[0].toUpperCase() + w0.slice(1);
       const topStr = formatClock(state.time);
       if (topStr !== lastTop) { lastTop = topStr; clockEl.textContent = topStr; }
       const cashStr = `$${Math.round(state.player.cash)}${state.sleeping ? '  (sleeping)' : ''}`;
@@ -82,6 +90,15 @@ export function initHud() {
       if (stamPct !== stamFill.dataset.v) {
         stamFill.dataset.v = stamPct;
         stamFill.style.width = `${stamPct}%`;
+      }
+
+      const tier = heatTier(state.heat);
+      const heatStr = `${tier}|${Math.round(state.heat)}|${state.player.inv.scanner > 0}`;
+      if (heatStr !== heatFill.dataset.v) {
+        heatFill.dataset.v = heatStr;
+        heatFill.style.width = `${Math.round(state.heat)}%`;
+        heatFill.className = `hud-bar-fill heat tier${tier}`;
+        heatLabel.textContent = `HEAT ${HEAT_NAMES[tier]}${state.player.inv.scanner > 0 ? ` ${state.heat.toFixed(1)}` : ''}`;
       }
 
       let hb = `${state.player.hotbarIndex}|`;

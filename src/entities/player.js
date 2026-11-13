@@ -33,6 +33,10 @@ const SHOP_KEYS = ['hardware', 'pawn', 'clinic', 'townhall', 'bar', 'alley'];
 // Hotbar items that tend a plant with the primary (left) click.
 const TEND_KEYS = { can: 'water', nutrients: 'feed', phkit: 'ph' };
 
+// Objects placed with right click (M4 adds lamps, hiding and stash gear).
+export const PLACEABLE = ['pot', 'rack', 'lamp_cfl', 'lamp_hps', 'lamp_led', 'filter',
+  'generator', 'safe', 'stash', 'hatch'];
+
 export function createPlayer(x, y) {
   const start = CONFIG.player.start;
   return {
@@ -64,6 +68,8 @@ export function createPlayer(x, y) {
     seedBag: [],                // purchased seed genomes, used in order
     cash: CONFIG.economy.startCash,
     bank: 0,                    // clean money (M10; exists for save shape)
+    debt: 0,                    // unpaid fines (blocks the license, M10)
+    arrests: 0,                 // third arrest = game over (plan §A15)
     level: 1, xp: 0,            // mastery.js is M7; level 1 throughout M2
     awakeHours: 0,              // Tired after 30 gh awake (plan §A3)
     canCharges: PS.canCapacity, // watering can pours left
@@ -97,7 +103,7 @@ export function cycleHotbar(state, dir) {
 /** Assign an inventory item key to a hotbar slot (inventory menu). */
 export function assignHotbar(state, index, key) {
   const p = state.player;
-  if (key === 'pot' || key === 'rack' || key === 'soil_potting' || key === 'soil_living' ||
+  if (PLACEABLE.includes(key) || key === 'soil_potting' || key === 'soil_living' ||
       key === 'can' || key === 'nutrients' || key === 'phkit') {
     p.hotbar[index] = { kind: 'item', key };
   } else if (key === 'dirt' || key === 'wood' || key === 'ladder') {
@@ -329,7 +335,7 @@ function tryPrimary(state, p, inp) {
     }
     return;
   }
-  if (p.tool === 'pot' || p.tool === 'rack') {
+  if (PLACEABLE.includes(p.tool)) {
     const cell = aimCell(state, p, inp);
     if (cell) placeObject(state, p.tool, cell.cx, cell.cy);
     return;
@@ -408,22 +414,47 @@ function tryPlaceTile(state, p, inp) {
  * ground below and no object yet. Consumes one item.
  */
 export function placeObject(state, key, cx, cy) {
-  if (key !== 'pot' && key !== 'rack') return false;
+  if (!PLACEABLE.includes(key)) return false;
   if (!inBounds(cx, cy)) return false;
   const cur = tileAt(state.tiles, cx, cy);
   if (cur !== T.AIR && cur !== T.BGWALL) return false;
-  if (!isSolidId(tileAt(state.tiles, cx, cy + 1))) return false;
   if (!isLotX(cx)) return false;
   if (state.objects.some((o) => o.x === cx && o.y === cy)) return false;
+  const solid = (x, y) => isSolidId(tileAt(state.tiles, x, y));
+  if (key === 'hatch') {
+    // A hatch closes a shaft or tunnel: solid on both sides, or above and below.
+    if (!((solid(cx - 1, cy) && solid(cx + 1, cy)) || (solid(cx, cy - 1) && solid(cx, cy + 1)))) return false;
+  } else if (!key.startsWith('lamp_') && !solid(cx, cy + 1)) {
+    return false; // everything but lamps and hatches stands on the ground
+  }
   const p = state.player;
   if ((p.inv[key] || 0) <= 0) return false;
-  const obj = key === 'pot'
-    ? { id: state.nextId++, kind: 'pot', x: cx, y: cy, soil: 'cheap', soilPh: PS.freshSoilPh, plantId: null }
-    : { id: state.nextId++, kind: 'rack', x: cx, y: cy };
+  const id = state.nextId++;
+  let obj;
+  if (key === 'pot') obj = { id, kind: 'pot', x: cx, y: cy, soil: 'cheap', soilPh: PS.freshSoilPh, plantId: null };
+  else if (key.startsWith('lamp_')) obj = { id, kind: 'lamp', lamp: key, x: cx, y: cy, hours: CONFIG.lamps.hoursNormal };
+  else if (key === 'safe' || key === 'stash') obj = { id, kind: key, x: cx, y: cy, cash: 0 };
+  else obj = { id, kind: key, x: cx, y: cy };
   p.inv[key]--;
   state.objects.push(obj);
   state.events.push({ type: 'action', name: 'place' });
   return true;
+}
+
+/** Stash/safe: put everything carried inside, or take it all back out. */
+export function useContainer(state, box) {
+  const p = state.player;
+  const carried = state.product.filter((b) => b.where === 'inv');
+  if (carried.length > 0 || p.cash > 0) {
+    for (const b of carried) { b.where = box.id; }
+    box.cash = (box.cash || 0) + p.cash;
+    p.cash = 0;
+    return 'Stashed your product and cash.';
+  }
+  for (const b of state.product) if (b.where === box.id) b.where = 'inv';
+  p.cash += box.cash || 0;
+  box.cash = 0;
+  return 'Took everything back.';
 }
 
 /** Place soil into the empty pot at (cx, cy). */
@@ -476,6 +507,8 @@ export function interactTarget(state) {
       consider({ kind: 'barrel', obj: o }, x, y);
     } else if (o.kind === 'bed') {
       consider({ kind: 'bed', obj: o }, x, y);
+    } else if (o.kind === 'lamp' || o.kind === 'stash' || o.kind === 'safe') {
+      consider({ kind: o.kind, obj: o }, x, y);
     }
   }
 
@@ -529,6 +562,8 @@ export function interactHint(state) {
       return o ? `E: Deliver ${nm}'s order (${Math.round(o.grams)} g)` : `E: Talk to ${nm}`;
     }
     case 'ped': return 'E: Offer a stranger some product';
+    case 'lamp': return `E: Lamp timer ${t.obj.hours} h (switch to ${t.obj.hours === CONFIG.lamps.hoursNormal ? CONFIG.lamps.hoursLong : CONFIG.lamps.hoursNormal} h)`;
+    case 'stash': case 'safe': return `E: Use the ${t.kind} (put in / take out)`;
     default: return null;
   }
 }
@@ -605,6 +640,15 @@ export function handleInteract(state) {
       break;
     case 'buyer':
       state.events.push({ type: 'openSell', buyer: t.key });
+      break;
+    case 'lamp': {
+      obj.hours = obj.hours === CONFIG.lamps.hoursNormal ? CONFIG.lamps.hoursLong : CONFIG.lamps.hoursNormal;
+      state.events.push({ type: 'toast', msg: `Lamp on a ${obj.hours} h timer${obj.hours === CONFIG.lamps.hoursLong ? ' (faster growth, double heat)' : ''}.` });
+      break;
+    }
+    case 'stash':
+    case 'safe':
+      state.events.push({ type: 'toast', msg: useContainer(state, obj) });
       break;
     case 'ped': {
       const r = economy.streetSale(state, t.ped);

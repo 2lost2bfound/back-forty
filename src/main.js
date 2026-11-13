@@ -1,7 +1,7 @@
 // main.js — boot, fixed-step loop, perf overlay, UI wiring (plan §B9).
 // Loop shape follows plan §B3: clamped dt, 60 Hz fixed physics, 2 Hz sim tick
 // (1 tick = 1/60 game hour), sleep runs the sim at 20x and stops physics.
-// stepSim order (plan §B3): time -> plants -> economy (heat/crew/threats/...
+// stepSim (src/sim/sim.js) runs time -> plants -> heat -> economy (crew/threats/...
 // join as they are built). The frame loop allocates nothing: input is a
 // reused object, the stress pool is a preallocated Float32Array, DOM updates
 // happen at CONFIG.ui.updateHz with dirty checks.
@@ -13,15 +13,13 @@ import { createRenderer } from './render/renderer.js';
 import { initHud } from './ui/hud.js';
 import { initMenus } from './ui/menus.js';
 import {
-  newGame, saveGame, loadGame, autosave, browserStorage, slotKey,
+  newGame, saveGame, loadGame, autosave, browserStorage, slotKey, autoKey,
 } from './state.js';
 import { stepPlayer, aimedPot, assignHotbar, interactHint } from './entities/player.js';
 import { plantByPot } from './sim/plants.js';
-import { stepTime, sleepStart } from './sim/time.js';
-import { stepPlants } from './sim/plants.js';
-import { stepEconomy } from './sim/economy.js';
+import { sleepStart } from './sim/time.js';
+import { stepSim } from './sim/sim.js';
 import { stepNpcs } from './entities/npc.js';
-import { stepSpawn } from './entities/spawn.js';
 import { T } from './world/tiles.js';
 
 // ---------------------------------------------------------------- boot ----
@@ -118,15 +116,6 @@ function updateStress(dt) {
   }
 }
 
-/** 2 Hz fixed step: time, plants, economy (§B3 order; more join per milestone). */
-function stepSim(s, dtReal) {
-  s.simTicks++;
-  stepTime(s, dtReal);
-  stepPlants(s, dtReal / CONFIG.clock.secPerGh);
-  stepEconomy(s, dtReal / CONFIG.clock.secPerGh);
-  stepSpawn(s);
-}
-
 // ------------------------------------------------------------- events ----
 
 /** Consume the sim's event queue once per frame (plan §B3). */
@@ -174,6 +163,26 @@ function processEvents() {
         break;
       case 'toast':
         hud.toast(ev.msg);
+        break;
+      case 'notice':
+        menus.openNotice(ev.title, ev.lines);
+        break;
+      case 'raidStart':
+        hud.toast(`POLICE RAID: ${ev.cops} cops are coming up the road!`);
+        break;
+      case 'raidWarning':
+        hud.toast(ev.source === 'deputy'
+          ? 'The deputy phones: "They are coming for you tonight."'
+          : `Scanner: a raid is coming in ${ev.gh} hours.`);
+        break;
+      case 'helicopter':
+        hud.toast('A helicopter circles in the dusk.');
+        break;
+      case 'skipped':
+        hud.toast(`${ev.days} day(s) pass.`);
+        break;
+      case 'gameOver':
+        menus.openGameOver(ev.reason);
         break;
       case 'openShop':
         menus.openShop(state, ev.shop);
@@ -247,7 +256,8 @@ function frame(now) {
     state.stressOn = !state.stressOn;
   }
   if (input.wasPressed('Escape') || input.wasPressed('KeyE')) {
-    if (menus.anyOpen()) menus.closeAll();
+    if (menus.isOpen('gameover')) { /* only its button leaves */ }
+    else if (menus.anyOpen()) menus.closeAll();
     else if (input.wasPressed('Escape')) menus.openPause(state);
   }
   if (input.wasPressed('KeyI') && !menus.anyOpen()) menus.openInventory(state);
@@ -290,6 +300,14 @@ window.addEventListener('backforty:assign', (e) => {
   if (assignHotbar(state, state.player.hotbarIndex, e.detail.key)) {
     hud.toast(`Assigned to slot ${state.player.hotbarIndex + 1}.`);
   }
+});
+window.addEventListener('backforty:loadauto', () => {
+  const loaded = loadGame(autoKey(1), browserStorage);
+  if (!loaded) { hud.toast('No autosave yet.'); return; }
+  state = loaded;
+  menus.closeAll();
+  renderer.invalidate();
+  hud.toast('Loaded the last autosave.');
 });
 window.addEventListener('backforty:save', () => {
   const r = saveGame(state, slotKey(1), browserStorage);

@@ -9,3 +9,4 @@ import './world.test.js';
 import './plants.test.js';
 import './save.test.js';
 import './economy.test.js';
+import './heat.test.js';

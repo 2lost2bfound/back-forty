@@ -12,6 +12,11 @@
 import { CONFIG } from '../config.js';
 import { withStateRng } from '../rng.js';
 import { rollSeedGenome } from './genetics.js';
+import {
+  addHeat, heatTier, noteSale, noteSpend, bribeDeputy, bribePrice, hireLawyer, rumorText,
+} from './heat.js';
+
+export { addHeat, heatTier };
 
 const E = CONFIG.economy;
 const P = CONFIG.plants;
@@ -31,10 +36,10 @@ export function shopOpen(time, shopKey) {
 }
 
 /** A shop's stock in menu order: {key, name, price, service, unreg}. */
-export function shopStock(shopKey) {
+export function shopStock(shopKey, state) {
   return E.stock[shopKey].map((key) => {
     const unreg = shopKey === 'alley' && E.unregStock.includes(key);
-    const base = E.prices[key];
+    const base = key === 'bribe' && state ? bribePrice(state) : E.prices[key];
     return {
       key, name: CONFIG.itemNames[key], unreg,
       price: unreg ? Math.round(base * (1 + E.alleyGunMarkup)) : base,
@@ -69,16 +74,23 @@ function grantItem(state, key) {
  * milestones. Returns {ok, msg}.
  */
 export function buyItem(state, key, shopKey = 'hardware') {
-  const entry = shopStock(shopKey).find((e) => e.key === key);
+  const entry = shopStock(shopKey, state).find((e) => e.key === key);
   if (!entry) return { ok: false, msg: 'They don\'t stock that.' };
   if (!shopOpen(state.time, shopKey)) return { ok: false, msg: `${E[shopKey].label} is closed.` };
   const p = state.player;
+  if (key === 'bribe') return bribeDeputy(state);
   if (p.cash < entry.price) return { ok: false, msg: 'Not enough cash.' };
   if (key === 'ask_around') return askAround(state);
   p.cash -= entry.price;
+  noteSpend(state, entry.price);
   if (entry.service) {
     state.events.push({ type: 'service', key });
-    if (key === 'drink') drinkAtBar(state);
+    if (key === 'drink') {
+      drinkAtBar(state);
+      if (heatTier(state.heat) >= 1) return { ok: true, msg: CONFIG.heat.peopleTalking };
+    }
+    if (key === 'rumor') return { ok: true, msg: rumorText(state) };
+    if (key === 'lawyer') hireLawyer(state);
     return { ok: true, msg: `Paid for: ${entry.name}` };
   }
   grantItem(state, key);
@@ -184,7 +196,7 @@ export function stepEconomy(state, gh) {
 
 // ======================================================== M3: buyers ======
 // Orders, trust, discovery and street sales (plan §A7). All state lives in
-// state.economy (saved); heat is a bare number until M4 owns it.
+// state.economy (saved); the heat meter itself lives in heat.js.
 
 const TR = E.trust;
 const MISS = E.miss;
@@ -216,16 +228,6 @@ export function trustLevel(pts) {
 }
 
 export const buyerLevel = (state, key) => trustLevel(state.economy.buyers[key].pts);
-
-export function heatTier(heat) {
-  let t = 0;
-  for (const h of E.heatTiers) if (heat >= h) t++;
-  return t; // 0 Cold, 1 Warm, 2 Hot, 3 Burning
-}
-
-export function addHeat(state, n) {
-  state.heat = Math.max(0, Math.min(E.heatMax, (state.heat || 0) + n));
-}
 
 function ledger(state, text, amount = 0) {
   const L = state.economy.ledger;
@@ -350,7 +352,8 @@ export function fillOrder(state, orderId) {
   const lvl = trustLevel(bs.pts);
   state.player.cash += q.value;
   state.economy.gross += q.value;
-  if (def.heat) addHeat(state, E.saleHeat[lvl]);
+  if (def.heat) addHeat(state, E.saleHeat[lvl], `Sale to ${def.name}`);
+  noteSale(state);
   bs.pts += pts;
   bs.streak = 0;
   state.economy.orders.splice(state.economy.orders.indexOf(order), 1);
@@ -451,7 +454,7 @@ export function askAround(state) {
   if (BUYER_KEYS.every((k) => eco.buyers[k].known)) return { ok: false, msg: 'You know everyone already.' };
   if (state.player.cash < A.cost) return { ok: false, msg: 'Not enough cash.' };
   state.player.cash -= A.cost;
-  addHeat(state, A.heat);
+  addHeat(state, A.heat, 'Asked around for buyers');
   eco.askAt = nowGh(state) + withStateRng(state, (rng) => rng.range(A.minGh, A.maxGh));
   ledger(state, 'Asked around at the bar', -A.cost);
   return { ok: true, msg: 'The bartender nods. Someone will find you.' };
@@ -492,7 +495,7 @@ export function streetSale(state, ped) {
   };
   if (r.cop < S.undercover[heatTier(state.heat || 0)]) {
     take();
-    addHeat(state, S.undercoverHeat);
+    addHeat(state, S.undercoverHeat, 'Sold to an undercover');
     ledger(state, `Undercover! Lost ${grams} g`);
     state.events.push({ type: 'undercover', grams });
     return { ok: false, undercover: true, msg: 'Undercover cop! Product gone.' };
@@ -501,7 +504,8 @@ export function streetSale(state, ped) {
   take();
   state.player.cash += value;
   state.economy.gross += value;
-  addHeat(state, S.heat);
+  addHeat(state, S.heat, 'Street sale to a stranger');
+  noteSale(state);
   state.economy.streetSales.push(nowGh(state));
   ledger(state, `Street sale, ${grams} g`, value);
   state.events.push({ type: 'sale', buyer: 'a stranger', grams, value, outcome: 'street' });

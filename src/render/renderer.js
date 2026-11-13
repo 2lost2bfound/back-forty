@@ -12,7 +12,10 @@ import { CONFIG } from '../config.js';
 import { buildAtlas } from './sprites.js';
 import { tileInfo, getTile } from '../world/tiles.js';
 import { plantFrameName, PLANT_H } from './spritedata.js';
-import { drawNightTint } from './lighting.js';
+import { createLighting } from './lighting.js';
+import { drawRain } from './particles.js';
+import { isRaining } from '../sim/time.js';
+import { hs } from '../sim/heat.js';
 import { stageOf, stressorsOf } from '../sim/plants.js';
 import { presentBuyers } from '../entities/npc.js';
 
@@ -33,6 +36,7 @@ export function createRenderer(canvas) {
   const atlas = buildAtlas();
   const sky = makeSkyCanvas();
   const hills = makeHillsCanvas();
+  const lighting = createLighting();
 
   // Chunk canvases are created up front and rendered lazily: on the first
   // draw every chunk is rendered once, after that only dirty ones.
@@ -160,6 +164,8 @@ export function createRenderer(canvas) {
           // 16x32 with the base ~12px into the pot cell.
           drawSprite('plant_' + plantFrameName(plant), sx, py + 12 - PLANT_H);
         }
+      } else if (NEW_OBJECTS[o.kind]) {
+        drawNewObject(o, sx, py);
       } else {
         drawSprite(OBJECT_SPRITES[o.kind], sx, py);
         if (o.kind === 'rack') {
@@ -171,6 +177,48 @@ export function createRenderer(canvas) {
         }
       }
     }
+  }
+
+  // M4 objects are drawn as simple shapes (procedural, no atlas entries).
+  const NEW_OBJECTS = {
+    lamp: '#f2e48a', stash: '#7a5a34', safe: '#6c7480', filter: '#3b3f46',
+    generator: '#c9632b', hatch: 'rgba(40,28,16,0.9)',
+  };
+  function drawNewObject(o, sx, py) {
+    ctx.fillStyle = NEW_OBJECTS[o.kind];
+    if (o.kind === 'lamp') ctx.fillRect(sx + 5, py + 2, 6, 4);
+    else if (o.kind === 'hatch') ctx.fillRect(sx + 1, py + 7, TS - 2, 2);
+    else ctx.fillRect(sx + 2, py + 5, TS - 4, TS - 5);
+  }
+
+  /** Cops, the patrol car and the unmarked car (M4 world tells). */
+  function drawPolice(state) {
+    const ground = state.surface[CONFIG.world.zones.roadX0 + 5] * TS - cam.ry;
+    const T = CONFIG.heat.tells;
+    if (state.tells && state.tells.unmarkedCar) drawCar(T.unmarkedCarX * TS - cam.rx, ground, '#2a2d33');
+    if (state.patrolCar) drawCar(state.patrolCar.x - cam.rx, ground, '#e8edf5', true);
+    ctx.fillStyle = '#2f5fb8';
+    for (const c of state.cops || []) {
+      const sx = Math.round(c.x - cam.rx);
+      if (sx < -8 || sx > W) continue;
+      ctx.fillRect(sx - 3, Math.round(state.surface[(c.x / TS) | 0] * TS - 14 - cam.ry), 6, 14);
+    }
+    const raid = hs(state).raid;
+    if (raid && raid.path.length > 0) {
+      const k = Math.min(1, raid.t / CONFIG.heat.raid.arriveGh) * (raid.path.length - 1);
+      const [tx, ty] = raid.path[Math.floor(k)];
+      for (let i = 0; i < raid.cops; i++) {
+        ctx.fillRect(Math.round(tx * TS + i * 5 - cam.rx), Math.round(ty * TS - 6 - cam.ry), 5, 22);
+      }
+    }
+  }
+
+  function drawCar(sx, ground, color, lights) {
+    if (sx < -40 || sx > W) return;
+    ctx.fillStyle = color;
+    ctx.fillRect(Math.round(sx), Math.round(ground - 12), 32, 10);
+    ctx.fillRect(Math.round(sx + 8), Math.round(ground - 18), 16, 6);
+    if (lights && ((Date.now() / 250) | 0) % 2) { ctx.fillStyle = '#d8402e'; ctx.fillRect(Math.round(sx + 12), Math.round(ground - 21), 8, 3); }
   }
 
   /** Buyers at their spots (marker sprite) and pedestrians (small figures). */
@@ -264,10 +312,12 @@ export function createRenderer(canvas) {
       drawVisibleChunks(state);
       drawObjectsAndPlants(state);
       drawPeople(state);
+      drawPolice(state);
       drawPlayer(state);
       drawDig(state);
       drawHover(state);
-      drawNightTint(ctx, state.time.hour); // flat night tint (M4: lights)
+      lighting.draw(ctx, state, cam);
+      if (isRaining(state)) drawRain(ctx, dt || 1 / 60);
       drawAltOverlay(state);
     },
 

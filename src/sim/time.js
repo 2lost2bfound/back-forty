@@ -19,6 +19,7 @@ const W = CONFIG.weather;
 export function stepTime(state, dt) {
   const gh = dt / C.secPerGh;
   const t = state.time;
+  const prevHour = t.hour;
   t.hour += gh;
 
   // Sleep countdown (plan §A3: 20x until 06:00; the speed itself is applied
@@ -42,9 +43,32 @@ export function stepTime(state, dt) {
   if (t.hour >= 24) {
     t.hour -= 24;
     t.day += 1;
-    t.weather = rollWeather(state);
     state.events.push({ type: 'dawn', day: t.day });
   }
+
+  // Weather rolls once a day at 06:00 (plan §A3); rain refills the barrel.
+  if (prevHour < W.rollHour && t.hour >= W.rollHour) t.weather = rollWeather(state);
+  if (isRaining(state)) {
+    for (const o of state.objects) {
+      if (o.kind === 'barrel') o.charges = Math.min(W.barrelMax, (o.charges || 0) + W.rainBarrelPerGh * gh);
+    }
+  }
+}
+
+/** Rain is active for rainDurationGh from the 06:00 roll on a rain day. */
+export function isRaining(state) {
+  const t = state.time;
+  return t.weather === 'rain' && t.hour >= W.rollHour && t.hour < W.rollHour + W.rainDurationGh;
+}
+
+/** Noise radius multiplier: rain muffles footsteps and gunshots by 30%. */
+export const noiseMult = (state) => (isRaining(state) ? W.rainNoiseMult : 1);
+
+/** Weather the HUD should name right now ('clear' when rain has stopped). */
+export function weatherNow(state) {
+  const w = state.time.weather;
+  if (w === 'rain') return isRaining(state) ? 'rain' : 'clear';
+  return w;
 }
 
 /** One weather roll per day at 06:00: 20% rain, 10% heatwave (plan §A3). */

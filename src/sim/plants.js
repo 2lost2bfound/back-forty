@@ -16,9 +16,10 @@
 import { CONFIG } from '../config.js';
 import { T, tileAt } from '../world/tiles.js';
 import { baseGenome } from './genetics.js';
-import { isLitHour } from './time.js';
+import { isLitHour, isRaining } from './time.js';
 
 const P = CONFIG.plants;
+const L = CONFIG.lamps;
 
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 
@@ -60,10 +61,37 @@ export function hasSun(state, pot) {
   return true;
 }
 
-/** Light factor right now for a pot: sun 1.0 in the window, else 0. */
+/** Is this lamp's timer running at `hour`? (starts at onHour, runs 14 or 18 h) */
+export function lampOn(lamp, hour) {
+  const len = (lamp.hours || L.hoursNormal) * 60;
+  const m = Math.round(hour * 60); // whole game-minutes: float drift never flips a tick
+  return ((m - L.onHour * 60) % 1440 + 1440) % 1440 < len;
+}
+
+/**
+ * Lamp coverage at `hour`: Map potId -> best light factor. A lamp lights the
+ * nearest N pots within its radius (plan §A4); overlaps take the best lamp.
+ */
+export function lampCoverage(state, hour) {
+  const cov = new Map();
+  const pots = state.objects.filter((o) => o.kind === 'pot');
+  for (const lamp of state.objects) {
+    if (lamp.kind !== 'lamp' || !lampOn(lamp, hour)) continue;
+    const def = L.types[lamp.lamp];
+    const near = pots
+      .map((pot) => ({ pot, d: Math.hypot(pot.x - lamp.x, pot.y - lamp.y) }))
+      .filter((e) => e.d <= def.radius)
+      .sort((a, b) => a.d - b.d)
+      .slice(0, def.pots);
+    for (const { pot } of near) cov.set(pot.id, Math.max(cov.get(pot.id) || 0, def.factor));
+  }
+  return cov;
+}
+
+/** Light factor right now for a pot: sun 1.0 in the window, else its best lamp. */
 export function lightFactor(state, pot) {
-  if (!isLitHour(state.time.hour) || !hasSun(state, pot)) return 0;
-  return 1;
+  if (isLitHour(state.time.hour) && hasSun(state, pot)) return 1;
+  return lampCoverage(state, state.time.hour).get(pot.id) || 0;
 }
 
 /**
@@ -110,6 +138,7 @@ export function createPlant(state, pot, strainKey, genome) {
     careTicks: 0,          // ∫dt with zero stressors
     ticks: 0,              // lifetime gh
     dryHours: 0,           // consecutive gh at moisture 0
+    darkGh: 0,             // consecutive gh an indoor plant had no light
     infested: false,       // M6 sabotage
     poisonedHours: 0,      // M6 poisoned water
     dead: false,
@@ -146,6 +175,7 @@ export function stressorsOf(plant) {
   if (plant.ph < P.phIdeal.lo || plant.ph > P.phIdeal.hi) {
     s.push(plant.ph < P.phMild.lo || plant.ph > P.phMild.hi ? 'phSevere' : 'phMild');
   }
+  if ((plant.darkGh || 0) >= P.darkStressGh) s.push('noLight');
   if (plant.nutrients < P.nutrientStress.lo) s.push('nutrientLow');
   else if (plant.nutrients > P.nutrientStress.hi) s.push('nutrientHigh');
   return s;
@@ -172,6 +202,9 @@ function killPlant(state, plant, cause) {
 
 /** Advance every plant by gh game hours. Call once per sim step. */
 export function stepPlants(state, gh) {
+  const raining = isRaining(state);
+  const heatwave = state.time.weather === 'heatwave';
+  let cov = null; // lamp coverage at the tick's start hour, built on first need
   for (const plant of state.plants) {
     if (plant.dead) continue;
     const pot = potOf(state, plant);
@@ -180,11 +213,19 @@ export function stepPlants(state, gh) {
     const stage = stageOf(plant);
     const soil = pot.soil || 'cheap';
     const sun = tickLight(state, pot, gh);
+    const outdoor = hasSun(state, pot);
+    if (!cov) cov = lampCoverage(state, ((state.time.hour - gh) % 24 + 24) % 24);
+    const lf = sun ? 1 : (cov.get(pot.id) || 0);
+    if (outdoor || lf > 0) plant.darkGh = 0;
+    else plant.darkGh = (plant.darkGh || 0) + gh;
 
-    // Moisture: stage loss x soil x outdoor-daytime modifier.
+    // Moisture: stage loss x soil x outdoor-daytime modifier; rain waters
+    // outdoor plants, a heatwave dries them faster (plan §A3).
     let mLoss = P.moistureLoss[stage] * P.soilMoistureMult[soil];
     if (sun) mLoss *= P.outdoorDayMoistureMult;
+    if (sun && heatwave) mLoss *= CONFIG.weather.heatwaveMoistureMult;
     plant.moisture = Math.max(0, plant.moisture - mLoss * gh);
+    if (raining && outdoor) plant.moisture = Math.min(100, plant.moisture + CONFIG.weather.rainMoistureGh * gh);
     if (plant.moisture <= 0) {
       plant.dryHours += gh;
       if (plant.dryHours >= P.dieAtZeroMoistureGh) {
@@ -218,11 +259,11 @@ export function stepPlants(state, gh) {
     // Growth: progress only accrues in light; the ripe clock is wall-clock gh.
     if (plant.progress >= 1) {
       plant.overHours += gh;
-    } else if (sun) {
+    } else if (lf > 0) {
       const uptake = phUptake(plant);
       if (uptake > 0) {
         const hf = 0.5 + 0.5 * plant.health / 100;
-        plant.progress += (sun ? 1 : 0) * hf * uptake * gh / totalLitHours(plant.genome);
+        plant.progress += lf * hf * uptake * gh / totalLitHours(plant.genome);
         if (plant.progress >= 1 - 1e-9) { plant.progress = 1; plant.overHours = 0; }
       }
     }

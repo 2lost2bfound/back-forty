@@ -316,3 +316,10 @@ body {
   color: #ffe27a;
   text-shadow: 1px 1px 0 #000;
 }
+
+/* Heat meter (M4): tier colours; width is the heat value. */
+.hud-bar-fill.heat { background: #6aa8d8; }
+.hud-bar-fill.heat.tier1 { background: #d8c84a; }
+.hud-bar-fill.heat.tier2 { background: #e08a30; }
+.hud-bar-fill.heat.tier3 { background: #d8402e; }
+.hud-heat { margin-top: 4px; }
