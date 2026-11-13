@@ -12,6 +12,7 @@ import { CONFIG } from './config.js';
 import { createRng } from './rng.js';
 import { generateWorld } from './world/worldgen.js';
 import { createPlayer } from './entities/player.js';
+import { initEconomy } from './sim/economy.js';
 
 export const SAVE_PREFIX = 'backforty';
 export const slotKey = (n) => `${SAVE_PREFIX}.slot${n}`;
@@ -42,6 +43,10 @@ export function newGame(seed) {
     plants: [],
     product: [],
     player,
+    economy: initEconomy({ day: CONFIG.clock.startDay, hour: CONFIG.clock.startHour }),
+    heat: 0,                    // plain number until M4's heat system owns it
+    npcs: [],                   // pedestrians (runtime only, not saved)
+    npcSeq: 0,
     nextId: world.nextId,       // shared id counter (objects, plants, batches)
     simTicks: 0,
     dirtyChunks: new Set(),     // runtime only (tile edits pending chunk redraw)
@@ -163,6 +168,8 @@ export function serializeState(state) {
     plants: state.plants,
     product: state.product,
     player: state.player,
+    economy: state.economy,
+    heat: state.heat,
   });
 }
 
@@ -192,10 +199,14 @@ export function deserializeState(json) {
     sleepRemain: o.sleepRemain || 0,
     tiles,
     surface: o.surface,
-    objects: o.objects || [],
+    objects: (o.objects || []).filter((x) => x.kind !== 'skeet'), // M2 marker, now a buyer
     plants: o.plants || [],
     product: o.product || [],
     player: o.player,
+    economy: o.economy || initEconomy(o.time),
+    heat: o.heat || 0,
+    npcs: [],
+    npcSeq: 0,
     nextId: o.nextId || 1,
     simTicks: o.simTicks || 0,
     dirtyChunks: new Set(),

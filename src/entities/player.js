@@ -24,9 +24,11 @@ import { T, itemKeyFor, setTile, digInfo, digTile, canPlace, inBounds, isSolidId
 import { moveBody, boxOverlapsId } from '../world/physics.js';
 import * as plants from '../sim/plants.js';
 import * as economy from '../sim/economy.js';
+import { pedNear } from './npc.js';
 
 const TS = CONFIG.world.tile;
 const PS = CONFIG.plants;
+const SHOP_KEYS = ['hardware', 'pawn', 'clinic', 'townhall', 'bar', 'alley'];
 
 // Hotbar items that tend a plant with the primary (left) click.
 const TEND_KEYS = { can: 'water', nutrients: 'feed', phkit: 'ph' };
@@ -44,6 +46,7 @@ export function createPlayer(x, y) {
     exhausted: false,
     sprinting: false,
     walkDist: 0,
+    riding: false,              // on the bicycle (needs inv.bicycle)
     dropT: 0,
     dropThrough: false,
     reachPx: CONFIG.player.digReachTiles * TS,
@@ -138,7 +141,7 @@ export function stepPlayer(state, inp, dt) {
 
   // Stamina (§A9: sprint −10/s, regen +15/s) with a small exhausted hysteresis.
   const moving = (inp.right ? 1 : 0) !== (inp.left ? 1 : 0);
-  p.sprinting = inp.sprint && moving && p.stamina > 0 && !p.exhausted;
+  p.sprinting = inp.sprint && moving && p.stamina > 0 && !p.exhausted && !p.riding;
   if (p.sprinting) {
     p.stamina -= C.sprintStaminaDrain * dt;
     if (p.stamina <= 0) { p.stamina = 0; p.exhausted = true; p.sprinting = false; }
@@ -146,7 +149,13 @@ export function stepPlayer(state, inp, dt) {
     p.stamina = Math.min(C.staminaMax, p.stamina + C.staminaRegen * dt);
     if (p.exhausted && p.stamina >= C.sprintMinStamina) p.exhausted = false;
   }
-  const speed = p.sprinting ? Ph.sprintSpeed : Ph.walkSpeed;
+  if (inp.bikePressed) {
+    inp.bikePressed = false;
+    if (p.riding) p.riding = false;
+    else if (p.inv.bicycle > 0) p.riding = true;
+  }
+  if (p.riding && p.onLadder) p.riding = false;
+  const speed = p.riding ? CONFIG.economy.bikeSpeed : p.sprinting ? Ph.sprintSpeed : Ph.walkSpeed;
   const dir = (inp.right ? 1 : 0) - (inp.left ? 1 : 0);
   if (dir) p.facing = dir;
 
@@ -467,20 +476,26 @@ export function interactTarget(state) {
       consider({ kind: 'barrel', obj: o }, x, y);
     } else if (o.kind === 'bed') {
       consider({ kind: 'bed', obj: o }, x, y);
-    } else if (o.kind === 'skeet') {
-      consider({ kind: 'skeet', obj: o }, x, y);
     }
   }
 
-  // The hardware store door (right wall, two tiles above the ground).
-  const hw = CONFIG.world.buildings.find((b) => b.key === CONFIG.economy.hardware.building);
-  if (hw) {
-    const doorX = hw.x + hw.w - 1;
-    const doorY = state.surface[doorX] - 1;
-    consider({ kind: 'shop' }, doorX, doorY);
+  // Shop doors (right wall of each building, two tiles above the ground).
+  for (const shop of SHOP_KEYS) {
+    const b = CONFIG.world.buildings.find((x) => x.key === CONFIG.economy[shop].building);
+    if (b) consider({ kind: 'shop', shop }, b.x + b.w - 1, state.surface[b.x + b.w - 1] - 1);
   }
+  // Buyers standing at their spot, and pedestrians (street sales).
+  for (const key of economy.BUYER_KEYS) {
+    if (!economy.buyerPresent(state, key)) continue;
+    const bx = CONFIG.economy.buyers[key].x;
+    consider({ kind: 'buyer', key }, bx, state.surface[bx] - 1);
+  }
+  const ped = pedNear(state);
+  if (ped) consider({ kind: 'ped', ped }, ped.x / TS - 0.5, pcy);
   return best;
 }
+
+const hh = (h) => `${h % 24}:00`;
 
 /** HUD hint for the current interaction target. */
 export function interactHint(state) {
@@ -502,12 +517,18 @@ export function interactHint(state) {
     case 'tap': return state.player.canCharges < PS.canCapacity ? 'E: Refill the can (tap)' : null;
     case 'barrel': return state.player.canCharges < PS.canCapacity ? 'E: Refill the can (barrel)' : null;
     case 'bed': return 'E: Sleep until 6:00';
-    case 'shop': return economy.shopOpen(state.time, 'hardware')
-      ? 'E: Browse the hardware store'
-      : 'Hardware store (8:00-18:00)';
-    case 'skeet': return economy.invBatches(state).length > 0
-      ? 'E: Sell to Skeet'
-      : 'Skeet: "Got anything to sell?"';
+    case 'shop': {
+      const sh = CONFIG.economy[t.shop];
+      return economy.shopOpen(state.time, t.shop)
+        ? `E: ${sh.label}`
+        : `${sh.label} (${hh(sh.open)}-${hh(sh.close)})`;
+    }
+    case 'buyer': {
+      const o = economy.orderOf(state, t.key);
+      const nm = CONFIG.economy.buyers[t.key].name;
+      return o ? `E: Deliver ${nm}'s order (${Math.round(o.grams)} g)` : `E: Talk to ${nm}`;
+    }
+    case 'ped': return 'E: Offer a stranger some product';
     default: return null;
   }
 }
@@ -528,6 +549,10 @@ export function handleInteract(state) {
       break;
     }
     case 'harvest':
+      if (economy.carriedGrams(state) >= economy.carryCap(state)) {
+        state.events.push({ type: 'toast', msg: 'You can\'t carry any more (buy a duffel).' });
+        break;
+      }
       startAction(state, p, 'harvest', PS.actionSeconds.harvest, { pot: obj, plant: t.plant });
       break;
     case 'emptyPot':
@@ -542,6 +567,10 @@ export function handleInteract(state) {
       break;
     case 'rack': {
       if (state.product.some((b) => b.where === obj.id && !b.wet)) {
+        if (economy.carriedGrams(state) >= economy.carryCap(state)) {
+          state.events.push({ type: 'toast', msg: 'You can\'t carry any more (buy a duffel).' });
+          break;
+        }
         economy.unloadRack(state, obj);
         state.events.push({ type: 'action', name: 'harvest' });
       } else if (state.product.some((b) => b.where === 'inv' && b.wet)) {
@@ -567,18 +596,20 @@ export function handleInteract(state) {
       break;
     }
     case 'shop':
-      if (economy.shopOpen(state.time, 'hardware')) {
-        state.events.push({ type: 'openShop' });
+      if (economy.shopOpen(state.time, t.shop)) {
+        state.events.push({ type: 'openShop', shop: t.shop });
       } else {
-        state.events.push({ type: 'toast', msg: 'The hardware store is closed (8:00-18:00).' });
+        const sh = CONFIG.economy[t.shop];
+        state.events.push({ type: 'toast', msg: `${sh.label} is closed (${hh(sh.open)}-${hh(sh.close)}).` });
       }
       break;
-    case 'skeet':
-      if (economy.invBatches(state).length > 0) {
-        state.events.push({ type: 'openSell' });
-      } else {
-        state.events.push({ type: 'toast', msg: 'Skeet: "Come back when you\'ve got product."' });
-      }
+    case 'buyer':
+      state.events.push({ type: 'openSell', buyer: t.key });
       break;
+    case 'ped': {
+      const r = economy.streetSale(state, t.ped);
+      state.events.push({ type: 'toast', msg: r.ok ? `Sold ${r.grams} g for $${Math.round(r.value)}.` : r.msg });
+      break;
+    }
   }
 }

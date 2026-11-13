@@ -20,6 +20,8 @@ import { plantByPot } from './sim/plants.js';
 import { stepTime, sleepStart } from './sim/time.js';
 import { stepPlants } from './sim/plants.js';
 import { stepEconomy } from './sim/economy.js';
+import { stepNpcs } from './entities/npc.js';
+import { stepSpawn } from './entities/spawn.js';
 import { T } from './world/tiles.js';
 
 // ---------------------------------------------------------------- boot ----
@@ -44,6 +46,7 @@ const SIM_DT = 1 / CONFIG.loop.simHz;      // 0.5 s = 1/60 game hour
 const inp = {
   left: false, right: false, up: false, down: false,
   sprint: false, jumpPressed: false,
+  bikePressed: false,
   digHeld: false, tendPressed: false, placePressed: false, interactPressed: false,
   aimX: 0, aimY: 0, select: 0,
   hotbar: -1, wheel: 0, alt: false,
@@ -61,6 +64,7 @@ function readInput() {
   inp.digHeld = (input.mouse.buttons & 1) !== 0;       // left held: dig
   inp.placePressed = input.wasButtonPressed(2);        // right click: place / pH Up
   inp.interactPressed = input.wasPressed('KeyE');
+  if (input.wasPressed('KeyB')) inp.bikePressed = true;
   inp.alt = k.has('AltLeft') || k.has('AltRight');
   inp.aimX = input.mouse.x + renderer.cam.rx;          // mouse -> world cell
   inp.aimY = input.mouse.y + renderer.cam.ry;
@@ -79,6 +83,7 @@ function flushOneShots() {
   inp.tendPressed = false;
   inp.placePressed = false;
   inp.interactPressed = false;
+  inp.bikePressed = false;
   inp.hotbar = -1;
   inp.wheel = 0;
   inp.select = 0;
@@ -89,6 +94,7 @@ function flushOneShots() {
 /** 60 Hz fixed step: player movement, dig/place/tend actions. (§B3) */
 function stepPhysics(s, dt) {
   stepPlayer(s, inp, dt);
+  stepNpcs(s, dt);
   if (s.stressOn) updateStress(dt);
 }
 
@@ -118,6 +124,7 @@ function stepSim(s, dtReal) {
   stepTime(s, dtReal);
   stepPlants(s, dtReal / CONFIG.clock.secPerGh);
   stepEconomy(s, dtReal / CONFIG.clock.secPerGh);
+  stepSpawn(s);
 }
 
 // ------------------------------------------------------------- events ----
@@ -147,6 +154,18 @@ function processEvents() {
       case 'sale':
         hud.toast(`Sold to ${ev.buyer}: +$${Math.round(ev.value)}`);
         break;
+      case 'order':
+        hud.toast(`${ev.name} wants ${ev.grams} g.`);
+        break;
+      case 'missed':
+        hud.toast(`You missed ${ev.name}'s order.`);
+        break;
+      case 'discover':
+        hud.toast(`New contact: ${ev.name} (${ev.via}).`);
+        break;
+      case 'undercover':
+        hud.toast('That was an undercover cop! Product gone.');
+        break;
       case 'dried':
         hud.toast('A batch finished drying.');
         break;
@@ -157,10 +176,10 @@ function processEvents() {
         hud.toast(ev.msg);
         break;
       case 'openShop':
-        menus.openShop(state);
+        menus.openShop(state, ev.shop);
         break;
       case 'openSell':
-        menus.openSell(state);
+        menus.openSell(state, ev.buyer);
         break;
       default:
         break; // 'action' sfx events are wired in M7
@@ -232,6 +251,10 @@ function frame(now) {
     else if (input.wasPressed('Escape')) menus.openPause(state);
   }
   if (input.wasPressed('KeyI') && !menus.anyOpen()) menus.openInventory(state);
+  if (input.wasPressed('Tab')) {
+    if (menus.isOpen('phone')) menus.closeAll();
+    else if (!menus.anyOpen()) menus.openPhone(state);
+  }
 
   processEvents();
 

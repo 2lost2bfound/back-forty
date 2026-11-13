@@ -306,3 +306,13 @@ body {
 .plant-panel-row {
   white-space: nowrap;
 }
+
+.hud-orders {
+  position: absolute;
+  top: 34px;
+  left: 8px;
+  font-size: 12px;
+  white-space: pre;
+  color: #ffe27a;
+  text-shadow: 1px 1px 0 #000;
+}

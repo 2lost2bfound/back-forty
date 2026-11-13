@@ -1,11 +1,14 @@
-// menus.js — DOM menus over the canvas (plan §B7): hardware shop, sell-to-
-// Skeet dialog, inventory, pause (save/load), harvest report card and the
+// menus.js — DOM menus over the canvas (plan §B7): shops, buyer order dialog,
+// phone (orders, contacts, ledger), inventory, pause (save/load), harvest report card and the
 // hover plant panel. All full-screen menus pause the simulation (plan §A2);
 // main.js derives state.paused from anyOpen(). Browser-only module.
 
 import { CONFIG } from '../config.js';
 import { stageOf, stressorsOf, avgHealthOf, careOf, litHoursToRipe } from '../sim/plants.js';
-import { hardwareStock, shopOpen, buyItem, invBatches, sellBatch } from '../sim/economy.js';
+import {
+  shopStock, shopOpen, buyItem, orderOf, fillQuote, fillOrder, nowGh, payFee,
+  buyerLevel, buyerMult, BUYER_KEYS, carriedGrams, carryCap,
+} from '../sim/economy.js';
 
 function el(tag, cls, parent, text) {
   const e = document.createElement(tag);
@@ -17,7 +20,10 @@ function el(tag, cls, parent, text) {
 
 export function initMenus(hud) {
   const root = document.getElementById('menus');
-  let open = null;          // 'shop' | 'sell' | 'inventory' | 'pause' | 'report'
+  let open = null;          // 'shop' | 'sell' | 'phone' | 'inventory' | 'pause' | 'report'
+  let shopKey = 'hardware';
+  let buyerKey = 'skeet';
+  let phoneTab = 'orders';
   let stateRef = null;      // the state the menu operates on
   const reportQueue = [];   // queued harvest report cards (My Addition 5)
 
@@ -36,10 +42,11 @@ export function initMenus(hud) {
   const invPanel = makePanel('inventory');
   const pausePanel = makePanel('pause');
   const reportPanel = makePanel('report');
+  const phonePanel = makePanel('phone');
 
   function closeAll() {
     open = null;
-    for (const p of [shopPanel, sellPanel, invPanel, pausePanel, reportPanel]) {
+    for (const p of [shopPanel, sellPanel, invPanel, pausePanel, reportPanel, phonePanel]) {
       p.panel.style.display = 'none';
     }
   }
@@ -53,66 +60,118 @@ export function initMenus(hud) {
 
   // ------------------------------------------------------------- shop ----
 
-  function openShop(state) {
+  function openShop(state, key = 'hardware') {
     stateRef = state;
+    shopKey = key;
     renderShop();
-    show(shopPanel, `Hardware store — $${Math.round(state.player.cash)}`, 'shop');
+    show(shopPanel, `${CONFIG.economy[key].label} — $${Math.round(state.player.cash)}`, 'shop');
   }
+
+  const hrs = (h) => `${h % 24}:00`;
 
   function renderShop() {
     const state = stateRef;
+    const sh = CONFIG.economy[shopKey];
     shopPanel.body.textContent = '';
-    if (!shopOpen(state.time, 'hardware')) {
-      el('div', 'menu-note', shopPanel.body, 'Closed. Open 8:00-18:00.');
+    if (!shopOpen(state.time, shopKey)) {
+      el('div', 'menu-note', shopPanel.body, `Closed. Open ${hrs(sh.open)}-${hrs(sh.close)}.`);
     }
-    for (const item of hardwareStock()) {
+    for (const item of shopStock(shopKey)) {
       const row = el('div', 'menu-row', shopPanel.body);
-      el('span', 'menu-item-name', row, item.name);
+      el('span', 'menu-item-name', row, item.name + (item.unreg ? ' (unregistered)' : ''));
       el('span', 'menu-item-price', row, `$${item.price}`);
       const btn = el('button', 'menu-btn', row, 'Buy');
       btn.disabled = state.player.cash < item.price;
       btn.onclick = () => {
-        const r = buyItem(state, item.key);
-        if (!r.ok) hud.toast(r.msg);
+        const r = buyItem(state, item.key, shopKey);
+        hud.toast(r.msg);
         renderShop();
-        shopPanel.title.textContent = `Hardware store — $${Math.round(state.player.cash)}`;
+        shopPanel.title.textContent = `${sh.label} — $${Math.round(state.player.cash)}`;
       };
     }
   }
 
   // ------------------------------------------------------------- sell ----
 
-  function openSell(state) {
+  function openSell(state, key = 'skeet') {
     stateRef = state;
+    buyerKey = key;
     renderSell();
-    show(sellPanel, 'Skeet — "What have you got?"', 'sell');
-  }
-
-  function priceText(batch) {
-    const per = (CONFIG.economy.priceBase + CONFIG.economy.pricePerQuality * batch.quality) *
-      (batch.wet ? CONFIG.plants.wetPriceMult : 1);
-    return `$${per.toFixed(2)}/g — $${(per * batch.grams).toFixed(0)} total`;
+    show(sellPanel, `${CONFIG.economy.buyers[key].name} — "What have you got?"`, 'sell');
   }
 
   function renderSell() {
     const state = stateRef;
+    const def = CONFIG.economy.buyers[buyerKey];
     sellPanel.body.textContent = '';
-    const batches = invBatches(state);
-    if (batches.length === 0) {
-      el('div', 'menu-note', sellPanel.body, 'Nothing to sell.');
+    const order = orderOf(state, buyerKey);
+    if (!order) {
+      el('div', 'menu-note', sellPanel.body, `${def.name} doesn't need anything right now.`);
       return;
     }
-    for (const b of batches) {
-      const row = el('div', 'menu-row', sellPanel.body);
-      el('span', 'menu-item-name', row,
-        `${b.strainName} · ${b.grams.toFixed(1)} g · q${b.quality}${b.wet ? ' (wet, half price)' : ''}`);
-      el('span', 'menu-item-price', row, priceText(b));
-      const btn = el('button', 'menu-btn', row, 'Sell');
-      btn.onclick = () => {
-        const value = sellBatch(state, b);
-        hud.toast(`Sold ${b.strainName} — +$${Math.round(value)}`);
-        renderSell();
-      };
+    const q = fillQuote(state, order);
+    const left = order.deadline - nowGh(state);
+    el('div', 'menu-note', sellPanel.body,
+      `Wants ${order.grams} g of dry, quality ${order.minQ}+ — ${left >= 0 ? `${left.toFixed(0)} gh left` : 'LATE'}`);
+    el('div', 'menu-note', sellPanel.body,
+      `You can deliver ${q.grams.toFixed(0)} g for $${q.value.toFixed(0)} (x${buyerMult(state, buyerKey).toFixed(2)}). Half the order is the minimum.`);
+    const row = el('div', 'menu-row', sellPanel.body);
+    const btn = el('button', 'menu-btn', row, q.grams < order.grams ? 'Deliver what I have' : 'Deliver order');
+    btn.onclick = () => {
+      const r = fillOrder(state, order.id);
+      hud.toast(r.ok ? `${r.outcome}: +$${Math.round(r.value)}` : r.msg);
+      renderSell();
+    };
+  }
+
+  // ------------------------------------------------------------ phone ----
+  // Tab: orders (with countdowns), contacts (trust), ledger (My Addition 5).
+
+  function openPhone(state) {
+    stateRef = state;
+    renderPhone();
+    show(phonePanel, 'Phone', 'phone');
+  }
+
+  function renderPhone() {
+    const state = stateRef;
+    const eco = state.economy;
+    phonePanel.body.textContent = '';
+    const tabs = el('div', 'menu-row', phonePanel.body);
+    for (const t of ['orders', 'contacts', 'ledger']) {
+      const b = el('button', 'menu-btn', tabs, t === phoneTab ? `[${t}]` : t);
+      b.onclick = () => { phoneTab = t; renderPhone(); };
+    }
+    el('div', 'menu-note', phonePanel.body,
+      `Cash $${Math.round(state.player.cash)} · Carrying ${carriedGrams(state).toFixed(0)}/${carryCap(state)} g · Heat ${state.heat.toFixed(0)} · Gross $${Math.round(eco.gross)}`);
+    if (phoneTab === 'orders') {
+      if (eco.orders.length === 0) el('div', 'menu-note', phonePanel.body, 'No open orders.');
+      for (const o of eco.orders) {
+        const left = o.deadline - nowGh(state);
+        el('div', 'menu-row', phonePanel.body,
+          `${CONFIG.economy.buyers[o.buyer].name}: ${o.grams} g, q${o.minQ}+, ` +
+          `${left >= 0 ? `${left.toFixed(0)} gh left` : `LATE (${(CONFIG.economy.lateGraceGh + left).toFixed(0)} gh grace)`}`);
+      }
+      for (const f of eco.fees) {
+        const row = el('div', 'menu-row', phonePanel.body, `A biker wants $${f.amount}.`);
+        const b = el('button', 'menu-btn', row, 'Pay');
+        b.onclick = () => { hud.toast(payFee(state).msg); renderPhone(); };
+      }
+    } else if (phoneTab === 'contacts') {
+      for (const key of BUYER_KEYS) {
+        const b = eco.buyers[key];
+        const def = CONFIG.economy.buyers[key];
+        if (!b.known) { el('div', 'menu-row', phonePanel.body, '???'); continue; }
+        const dorm = b.dormantUntil ? ` — gone ${Math.ceil((b.dormantUntil - nowGh(state)) / 24)} d` : '';
+        el('div', 'menu-row', phonePanel.body,
+          `${def.name} (${def.where} ${hrs(def.open)}-${hrs(def.close)}) trust ${buyerLevel(state, key)}/5, ${b.pts} pts${dorm}`);
+      }
+    } else {
+      if (eco.ledger.length === 0) el('div', 'menu-note', phonePanel.body, 'Nothing yet.');
+      for (const e of eco.ledger.slice().reverse()) {
+        el('div', 'menu-row', phonePanel.body,
+          `Day ${e.day} ${e.hour}:00  ${e.text}${e.amount ? `  ${e.amount > 0 ? '+' : '-'}$${Math.abs(Math.round(e.amount))}` : ''}`);
+      }
     }
   }
 
@@ -229,7 +288,7 @@ export function initMenus(hud) {
   }
 
   return {
-    openShop, openSell, openInventory, openPause,
+    openShop, openSell, openInventory, openPause, openPhone,
     queueReport,
     closeAll,
     anyOpen: () => open !== null,

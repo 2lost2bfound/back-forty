@@ -232,19 +232,119 @@ export const CONFIG = {
     actionSeconds: { water: 0.6, feed: 0.8, ph: 0.8, plant: 1, harvest: 2, refill: 1 },
   },
 
-  // Economy (plan §A7). M2 scope: cash only, Skeet at a fixed price, the
-  // hardware shop with seeds/pots/soil/nutrients/pH kit/meters/rack.
+  // Economy (plan §A7). M3: five buyers, orders, trust, discovery, street
+  // sales, every shop's stock and hours.
   economy: {
     startCash: 300,
     priceBase: 4, pricePerQuality: 0.1,   // $/g = 4 + 0.10 * quality
-    skeet: { x: 265, open: 12, close: 22 },   // park, 12:00-22:00
-    hardware: { building: 'hardware', open: 8, close: 18 }, // 08:00-18:00
+    // Shops: the building whose right wall is the door, and opening hours
+    // (open > close wraps past midnight). Plan §A3 schedule.
+    hardware: { building: 'hardware', label: 'Hardware store', open: 8, close: 18 },
+    pawn:     { building: 'pawn',     label: 'Pawn shop',      open: 10, close: 20 },
+    clinic:   { building: 'clinic',   label: 'Clinic',         open: 8, close: 18 },
+    townhall: { building: 'townhall', label: 'Town hall',      open: 9, close: 17 },
+    bar:      { building: 'bar',      label: 'Bar',            open: 16, close: 2 },
+    alley:    { building: 'alley',    label: 'Moss (alley)',   open: 21, close: 4 },
+    alleyGunMarkup: 0.5,                  // unregistered guns cost +50%
     prices: {
       seeds: 20, pot: 10, soil_potting: 15, soil_living: 40,
       nutrients: 20, phkit: 10,
       moisture_meter: 30, ph_meter: 60, loupe: 25, rack: 50,
+      neem: 15, lamp_cfl: 80, lamp_hps: 300, lamp_led: 700, drip: 400,
+      filter: 200, generator: 900, wood: 2, concrete_tile: 5, ladder: 5,
+      door: 20, lock: 30, hatch: 600, stash: 80, tripwire: 30, floodlight: 120,
+      camera: 250, pickaxe: 80, cart: 150, bicycle: 200, duffel: 100,
+      barrel_lock: 40,
+      bat: 40, pistol22: 350, pistol9: 700, shotgun: 1200, rifle: 2000,
+      ammo_22: 10, ammo_9: 15, ammo_shell: 15, ammo_rifle: 16,
+      scanner: 250, safe: 500, bandage: 20, suppressor: 900,
+      drink: 5, rumor: 20, ask_around: 50,
+      heal: 100, vet: 150, detox: 1500, taper: 100,
+      lawyer: 200, permit: 3000,
     },
     doses: { nutrients: 10, phkit: 10 },  // a bottle/kit contains this many doses
+    // Items bought in packs: inventory units granted per purchase.
+    packs: { ammo_22: 10, ammo_9: 10, ammo_shell: 5, ammo_rifle: 4 },
+    // Stock per shop (menu order). `service` entries are paid for but not
+    // carried (their effects arrive with the milestones that own them);
+    // `unreg` marks alley guns.
+    stock: {
+      hardware: ['seeds', 'pot', 'soil_potting', 'soil_living', 'nutrients', 'phkit',
+        'moisture_meter', 'ph_meter', 'loupe', 'rack', 'neem', 'lamp_cfl', 'lamp_hps',
+        'lamp_led', 'drip', 'filter', 'generator', 'wood', 'concrete_tile',
+        'ladder', 'door', 'lock', 'hatch', 'stash', 'tripwire', 'floodlight', 'camera',
+        'pickaxe', 'cart', 'bicycle', 'duffel', 'barrel_lock'],
+      pawn: ['bat', 'pistol22', 'pistol9', 'shotgun', 'rifle', 'ammo_22', 'ammo_9',
+        'ammo_shell', 'ammo_rifle', 'scanner', 'safe', 'bandage'],
+      alley: ['pistol22', 'pistol9', 'shotgun', 'rifle', 'suppressor'],
+      bar: ['drink', 'rumor', 'ask_around'],
+      clinic: ['heal', 'vet', 'detox', 'taper'],
+      townhall: ['lawyer', 'permit'],
+    },
+    unregStock: ['pistol22', 'pistol9', 'shotgun', 'rifle'],
+    services: ['drink', 'rumor', 'ask_around', 'heal', 'vet', 'detox', 'taper', 'lawyer', 'permit'],
+
+    // Carry limits (plan §A5 patrol stops): grams of product on you.
+    carry: { backpack: 500, duffel: 2000 },
+    // Bicycle (plan §A3, My Addition 10).
+    bikeSpeed: 220,
+
+    // Trust (plan §A7). Level = number of thresholds reached.
+    trust: {
+      thresholds: [10, 30, 60, 100, 150],
+      priceMult: [0.8, 0.9, 1.0, 1.1, 1.2, 1.3],
+      full: 10, qualityBonus: 5, qualityBonusOver: 20,
+      partial: 3, partialMin: 0.5, late: 0, missed: -15,
+    },
+    lateGraceGh: 12,
+    // Missed orders (plan §A7).
+    miss: {
+      smallerMult: 0.75,
+      streakDormantDays: 6, streakLevelDrop: 1,
+      repeatCount: 3, repeatWindowDays: 10, repeatDormantDays: 10,
+      skeetMaxDormantDays: 2,
+      toneFee: 500,
+      daleAggression: 5,
+    },
+    firstOrderDelayGh: 12,     // newly discovered buyer's first order
+    returnDelayGh: 12,         // returning buyer's first order
+    // Buyers (plan §A7 table). x is the tile the buyer stands on; open/close
+    // wrap past midnight. weekdays: only on days where day % 7 is listed.
+    buyers: {
+      skeet:  { name: 'Skeet', where: 'park', x: 265, open: 12, close: 22,
+        min: 14, max: 28, everyDays: 2, minQ: 20, mod: 1.0, deadlineGh: 24,
+        start: true, firstOrderGh: 144, heat: true },
+      marla:  { name: 'Marla', where: 'bar', x: 284, open: 16, close: 2,
+        min: 56, max: 112, everyDays: 3, minQ: 35, mod: 1.0, deadlineGh: 24, heat: true },
+      doc:    { name: 'Doc Renner', where: 'clinic back door', x: 326, open: 18, close: 21,
+        min: 84, max: 168, everyDays: 4, minQ: 55, mod: 1.15, deadlineGh: 24, heat: false },
+      tone:   { name: 'Big Tone', where: 'alley garage', x: 345, open: 14, close: 24,
+        min: 224, max: 448, everyDays: 5, minQ: 40, mod: 0.9, deadlineGh: 48, heat: true, dale: true },
+      vivian: { name: 'Vivian', where: 'motel', x: 384, open: 20, close: 3,
+        min: 448, max: 900, everyDays: 7, minQ: 60, mod: 1.0, deadlineGh: 48, heat: true, dale: true,
+        weekdays: [5, 6, 0] },
+    },
+    // Referral: `from` gives you `to` at trust level `level` (0 heat).
+    referrals: [
+      { from: 'skeet', level: 2, to: 'marla' },
+      { from: 'marla', level: 3, to: 'doc' },
+      { from: 'marla', level: 4, to: 'tone' },
+      { from: 'tone',  level: 3, to: 'vivian' },
+    ],
+    // Heat per sale by trust level 0-1 / 2-3 / 4-5 (plan §A5).
+    saleHeat: [2, 2, 1, 1, 0.5, 0.5],
+    heatTiers: [25, 50, 75],               // Cold / Warm / Hot / Burning
+    heatMax: 100,
+    // Discovery.
+    barDrinksToTalk: 3,                    // 3 drinks and a chat reveals Marla
+    askAround: { cost: 50, heat: 4, minGh: 24, maxGh: 48 },
+    // Street sales (plan §A7): per-pedestrian interest, size, price, heat.
+    street: { interest: 0.2, minG: 3.5, maxG: 14, mod: 1.0, heat: 3,
+      undercover: [0.02, 0.05, 0.10, 0.20], undercoverHeat: 12 },
+    ledgerMax: 100,
+    // Pedestrians (npc.js / spawn.js): town zone, hours, cap, walk speed.
+    peds: { x0: 225, x1: 395, cap: 8, speed: 25, spawnChance: 0.15,
+      open: 7, close: 22, reach: 2 },
   },
 
   // Inventory items (display names for HUD/hotbar/menus).
@@ -255,6 +355,33 @@ export const CONFIG = {
     moisture_meter: 'Moisture meter', ph_meter: 'pH meter', loupe: 'Loupe',
     rack: 'Drying rack', dirt: 'Dirt', wood: 'Wood', ladder: 'Ladder',
     pickaxe: 'Pickaxe',
+    neem: 'Neem oil', lamp_cfl: 'CFL lamp', lamp_hps: 'HPS lamp', lamp_led: 'LED lamp',
+    drip: 'Drip kit', filter: 'Carbon filter', generator: 'Generator',
+    concrete_tile: 'Concrete tile', door: 'Door', lock: 'Lock',
+    hatch: 'Hidden hatch', stash: 'Stash box', tripwire: 'Tripwire',
+    floodlight: 'Floodlight', camera: 'Camera', cart: 'Hand cart', bicycle: 'Bicycle',
+    duffel: 'Duffel bag', barrel_lock: 'Barrel lock',
+    bat: 'Baseball bat', pistol22: '.22 pistol', pistol9: '9 mm pistol',
+    shotgun: 'Pump shotgun', rifle: 'Hunting rifle', ammo_22: '.22 rounds',
+    ammo_9: '9 mm rounds', ammo_shell: 'Shotgun shells', ammo_rifle: 'Rifle rounds',
+    scanner: 'Police scanner', safe: 'Safe', bandage: 'Bandage', suppressor: 'Suppressor',
+    drink: 'Drink', rumor: 'Rumor', ask_around: 'Ask around for buyers',
+    heal: 'Full heal', vet: 'Vet', detox: 'Detox', taper: 'Taper kit (1 day)',
+    lawyer: 'Lawyer retainer (1 day)', permit: 'Farm-stand permit',
+  },
+
+  // Headless balance bot policy (tools/balance.js, My Addition 11).
+  balance: {
+    days: 45,
+    policyEvery: 10,       // run the policy every N sim ticks (speed)
+    waterAt: 40, feedAt: 40, phMargin: 0.1,  // act when this close to the ideal edge
+    reserve: 60,           // cash the bot never spends on expansion...
+    upkeepPerPlant: 12,    // ...plus this per plant (nutrients, pH kits)
+    shopHour: 9,           // daily replant/expand shopping
+    firstNewPotX: 60,      // tile where new pots and racks are placed
+    townFrom: 7, townTo: 22,
+    partialWithinGh: 8,    // deliver half an order when the deadline is this close
+    streetPerDay: 10, streetKeep: 20, streetReserveMult: 1.2,
   },
 
   // Rendering (plan §B7).

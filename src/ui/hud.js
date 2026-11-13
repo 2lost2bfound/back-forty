@@ -4,6 +4,7 @@
 
 import { CONFIG } from '../config.js';
 import { formatClock } from '../sim/time.js';
+import { nowGh } from '../sim/economy.js';
 import { tileInfo, itemKeyFor } from '../world/tiles.js';
 
 const U = CONFIG.ui;
@@ -22,6 +23,8 @@ export function initHud() {
   const clockEl = el('span', 'hud-clock', top);
   const weatherEl = el('span', 'hud-weather', top);
   const cashEl = el('span', 'hud-cash', top);
+
+  const ordersEl = el('div', 'hud-orders', root);
 
   const barWrap = el('div', 'hud-bars', root);
   const stamOuter = el('div', 'hud-bar-outer', barWrap);
@@ -47,6 +50,7 @@ export function initHud() {
   let lastTop = '';
   let lastHotbar = '';
   let lastPrompt = '';
+  let lastOrders = '';
 
   function slotText(state, i) {
     const e = state.player.hotbar[i];
@@ -95,6 +99,14 @@ export function initHud() {
           slots[i].count.textContent = texts[i].count === '' ? '' : String(texts[i].count);
         }
       }
+
+      // Order timers: buyer, grams, hours left (red when late).
+      const now = nowGh(state);
+      const ordStr = state.economy.orders.map((o) => {
+        const left = o.deadline - now;
+        return `${CONFIG.economy.buyers[o.buyer].name} ${o.grams}g ${left >= 0 ? `${Math.ceil(left)}h` : 'LATE'}`;
+      }).join('\n');
+      if (ordStr !== lastOrders) { lastOrders = ordStr; ordersEl.textContent = ordStr; }
 
       if (hint !== lastPrompt) {
         lastPrompt = hint;

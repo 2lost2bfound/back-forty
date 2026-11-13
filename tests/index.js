@@ -8,3 +8,4 @@ import './rng.test.js';
 import './world.test.js';
 import './plants.test.js';
 import './save.test.js';
+import './economy.test.js';

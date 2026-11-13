@@ -148,7 +148,6 @@ export function generateWorld(seed) {
   add('pot', 46, { soil: 'cheap', soilPh: P.freshSoilPh, plantId: null });
   add('pot', 47, { soil: 'cheap', soilPh: P.freshSoilPh, plantId: null });
   add('bed', 50);                                  // shack interior
-  add('skeet', CONFIG.economy.skeet.x);            // park marker (town)
-
+  
   return { grid, surface, objects, nextId };
 }

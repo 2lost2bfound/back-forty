@@ -14,6 +14,7 @@ import { tileInfo, getTile } from '../world/tiles.js';
 import { plantFrameName, PLANT_H } from './spritedata.js';
 import { drawNightTint } from './lighting.js';
 import { stageOf, stressorsOf } from '../sim/plants.js';
+import { presentBuyers } from '../entities/npc.js';
 
 const W = CONFIG.canvas.width;
 const H = CONFIG.canvas.height;
@@ -172,6 +173,19 @@ export function createRenderer(canvas) {
     }
   }
 
+  /** Buyers at their spots (marker sprite) and pedestrians (small figures). */
+  function drawPeople(state) {
+    for (const b of presentBuyers(state)) {
+      drawSprite('obj_skeet', b.x * TS - cam.rx, (state.surface[b.x] - 1) * TS - cam.ry);
+    }
+    ctx.fillStyle = '#8a7fa8';
+    for (const n of state.npcs) {
+      const sx = Math.round(n.x - cam.rx);
+      if (sx < -8 || sx > W) continue;
+      ctx.fillRect(sx - 3, Math.round(state.surface[(n.x / TS) | 0] * TS - 14 - cam.ry), 6, 14);
+    }
+  }
+
   function drawSprite(name, sx, sy) {
     const r = atlas.rects[name];
     if (!r || sy < -r[3] || sy > H || sx < -r[2] || sx > W) return;
@@ -249,6 +263,7 @@ export function createRenderer(canvas) {
       drawHills();
       drawVisibleChunks(state);
       drawObjectsAndPlants(state);
+      drawPeople(state);
       drawPlayer(state);
       drawDig(state);
       drawHover(state);
