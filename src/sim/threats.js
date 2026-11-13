@@ -1,7 +1,8 @@
 // threats.js — event director, thieves, security alerts, blood feud, the dog's
 // AI and the Fugitive end state (plan §A3, §A6, §A9; My Additions 3, 4, 7).
 // Pure module: no window/document, runs unmodified in Node. M6 adds the rival
-// (sabotage, goons) on top of the same director.
+// (sabotage, goons) on top of the same director: Dale's aggression, the nightly
+// 23:00 roll, the saboteur and goon entities, tribute and truce.
 //
 // Thieves are plain entities in state.entities (runtime only). They are
 // stepped here at 2 Hz (with the sim), so the same code runs in the browser,
@@ -14,21 +15,22 @@
 import { CONFIG } from '../config.js';
 import { createRng } from '../rng.js';
 import { stageOf } from './plants.js';
-import { hs, wakeUp } from './heat.js';
-import { pricePerGram } from './economy.js';
+import { hs, wakeUp, heatEvent } from './heat.js';
+import { pricePerGram, BUYER_KEYS, buyerLevel, nowGh as nowGhEco } from './economy.js';
 import { nightKey } from './time.js';
 import { roomOf, isBuried } from '../world/rooms.js';
 import { raycastSolid } from '../world/physics.js';
-import { damageEntity, enemyShoot, hurtPlayer, stepCops, groundY } from '../entities/combat.js';
+import { damageEntity, enemyShoot, hurtPlayer, stepCops, groundY, HOSTILE_KINDS } from '../entities/combat.js';
 import { dogHomeX } from '../entities/dog.js';
 
 const TH = CONFIG.threats;
 const BI = TH.breakIn;
 const T = TH.thief;
 const DG = TH.dog;
+const RV = TH.rival;
 const TS = CONFIG.world.tile;
 const nowGh = (s) => s.time.day * 24 + s.time.hour;
-const crossed = (prev, cur, at) => (prev - cur > 12 ? at > prev || at <= cur : prev < at && at <= cur);
+export const crossed = (prev, cur, at) => (prev - cur > 12 ? at > prev || at <= cur : prev < at && at <= cur);
 
 export function initThreats(seed = 1) {
   return {
@@ -37,9 +39,11 @@ export function initThreats(seed = 1) {
     history: [],            // [{night, kind}] (for tests and the journal)
     feud: [],               // [{night, kind: 'feud' | 'biker'}]
     wordUntil: 0,           // night key until which "the word is out"
+    selloutUntil: 0,        // night key until which a quitter's tip-off raises break-ins (M6)
     lock: null,             // 'padlock' | 'deadbolt' | 'steeldoor' on the shack door
     dog: null,              // see entities/dog.js
     footage: 0,             // recorded intruders (leverage, M6)
+    rival: initRival(seed), // Dale Pruitt (M6)
     news: [],               // morning-after lines
     downed: false,
     lastHour: null,
@@ -49,7 +53,28 @@ export function initThreats(seed = 1) {
   };
 }
 
-export const tt = (state) => state.threats || (state.threats = initThreats(state.seed));
+export function initRival(seed = 1) {
+  return {
+    aggression: RV.start, rngState: ((seed ^ 0x5bd1e995) >>> 0), // its own stream: thieves keep their draws
+    trust3: [], absorbed: 0, frozenUntil: 0, backOffUntil: 0, squadsBeaten: 0,
+    leverage: false, tributeAt: -1e9, poison: null,
+  };
+}
+
+export const tt = (state) => {
+  const t = state.threats || (state.threats = initThreats(state.seed));
+  if (!t.rival) t.rival = initRival(state.seed); // saves from before M6
+  return t;
+};
+export const rv = (state) => tt(state).rival;
+
+function rivalRng(state, fn) {
+  const r = rv(state);
+  const rng = createRng(r.rngState);
+  const out = fn(rng);
+  r.rngState = rng.state;
+  return out;
+}
 
 function rngOf(state, fn) {
   const t = tt(state);
@@ -112,11 +137,12 @@ export function breakInChance(state) {
   const gen = state.objects.some((o) => o.kind === 'generator');
   const sec = securityOf(state);
   const word = nightKey(state.time) <= tt(state).wordUntil ? CONFIG.threats.wordOfMouth.cut : 0;
+  const sellout = nightKey(state.time) <= tt(state).selloutUntil ? CONFIG.crew.quit.breakIn : 0;
   const parts = {
     product: value / BI.valuePerPct, ripe: ripe * BI.perRipePlant, street: street * BI.perStreetSale,
-    generator: gen ? BI.generator : 0, security: sec.total, word,
+    generator: gen ? BI.generator : 0, security: sec.total, word, sellout,
   };
-  const raw = parts.product + parts.ripe + parts.street + parts.generator - parts.security - parts.word;
+  const raw = parts.product + parts.ripe + parts.street + parts.generator + parts.sellout - parts.security - parts.word;
   return { ...parts, raw, total: Math.max(BI.min, Math.min(BI.max, raw)) };
 }
 
@@ -218,6 +244,7 @@ function checkSecurity(state, e, prevX) {
       if (dx >= -0.5 && dx <= TH.camera.coneTiles) {
         o.footage = (o.footage || 0) + (e.alerts[`camera${o.id}`] ? 0 : 1);
         if (!e.alerts[`camera${o.id}`]) t.footage++;
+        if (e.kind === 'saboteur' || e.kind === 'goon') t.rival.leverage = true; // Dale's men on tape
         alert(state, e, 'camera', o.id, `Camera alert: someone is at x ${Math.round(tx)}.`);
       }
     }
@@ -356,7 +383,7 @@ function stepDog(state, dt) {
   if (!dog) return;
   const E = state.entities || [];
   if (dog.hp <= 0) { dog.state = 'hurt'; return; }
-  const prey = E.filter((e) => e.kind === 'thief' && e.state !== 'ko' && e.state !== 'dead')
+  const prey = E.filter((e) => HOSTILE_KINDS.includes(e.kind) && e.state !== 'ko' && e.state !== 'dead')
     .sort((a, b) => Math.abs(a.x - dog.x) - Math.abs(b.x - dog.x))[0];
   if (prey && Math.abs(prey.x - dog.x) <= DG.barkTiles * TS) {
     dog.state = 'attack';
@@ -435,6 +462,282 @@ function stepDispatch(state) {
   state.cops = state.cops.filter((c) => !c.responder || nowGh(state) < c.until);
 }
 
+// =========================================================== M6: rival ====
+// Dale Pruitt (plan §A6): an aggression value, one 23:00 roll a night, three
+// sabotage types, goon squads from 70, tribute and truce. All of it goes
+// through the director, and Dale himself is never on screen.
+
+const pctOf = (state) => Math.min(RV.maxChance, rv(state).aggression * RV.chancePerPoint) / 100;
+export const rivalChance = pctOf;
+
+/** Move Dale's aggression. Gains are ignored while a truce holds. */
+export function rivalBump(state, n) {
+  const r = rv(state);
+  if (n > 0 && nowGhEco(state) < r.frozenUntil) return;
+  r.aggression = Math.max(0, Math.min(RV.max, r.aggression + n));
+}
+
+/** Weekly tribute ($300 by phone): aggression -10. */
+export function payTribute(state) {
+  const r = rv(state);
+  const now = nowGhEco(state);
+  if (now < r.tributeAt + RV.tribute.everyDays * 24) return { ok: false, msg: 'Dale was paid this week already.' };
+  if (state.player.cash < RV.tribute.cost) return { ok: false, msg: 'Not enough cash.' };
+  state.player.cash -= RV.tribute.cost;
+  r.tributeAt = now;
+  rivalBump(state, -RV.tribute.drop);
+  return { ok: true, msg: `Sent Dale $${RV.tribute.cost}. He will keep his dogs on a leash for a while.` };
+}
+
+/** Truce at the bar (aggression 60+, $2,000): aggression 10, frozen 10 days. */
+export function buyTruce(state) {
+  const r = rv(state);
+  const X = RV.truce;
+  if (r.aggression < X.minAggression) return { ok: false, msg: 'Nobody is offering a truce. Dale is not angry enough to deal.' };
+  if (state.player.cash < X.cost) return { ok: false, msg: 'Not enough cash.' };
+  state.player.cash -= X.cost;
+  r.aggression = X.setTo;
+  r.frozenUntil = nowGhEco(state) + X.frozenDays * 24;
+  return { ok: true, msg: 'The bartender carries your envelope up the ridge. Dale agrees to a truce.' };
+}
+
+/** Rival gains that other systems record: buyers at trust 3, taken buyers. */
+function stepRival(state) {
+  const r = rv(state);
+  for (const key of BUYER_KEYS) {
+    if (!r.trust3.includes(key) && buyerLevel(state, key) >= 3) { r.trust3.push(key); rivalBump(state, RV.trust3Bump); }
+  }
+  const d = state.economy.daleAggression - r.absorbed;
+  r.absorbed = state.economy.daleAggression;
+  if (d > 0) rivalBump(state, d);
+}
+
+/** Open-room pots Dale's men can find (hidden rooms 25% each, like thieves). */
+function rivalPots(state, rng) {
+  const cache = new Map();
+  const found = (x, y) => {
+    const room = roomOf(state, x, y);
+    if (room.open) return true;
+    if (!cache.has(room.id)) cache.set(room.id, rng.chance(T.hatchFind));
+    return cache.get(room.id);
+  };
+  return state.objects.filter((o) => o.kind === 'pot' && found(o.x, o.y));
+}
+
+const spawnX = (rng) => rng.range(T.spawnX0, T.spawnX1) * TS;
+
+/** Put Dale's saboteur in the woods. job: 'poison' | 'pest'. */
+export function spawnSaboteur(state, job, { source = 'tap', plantId = null } = {}) {
+  const x = rivalRng(state, (r) => spawnX(r));
+  const e = {
+    id: state.nextId++, kind: 'saboteur', x, y: groundY(state, x), hp: RV.saboteur.hp, state: 'approach',
+    job, source, plantId, workLeft: 0, alerts: {}, dir: 1,
+  };
+  (state.entities || (state.entities = [])).push(e);
+  return e;
+}
+
+/** A goon squad (hp 80, pistol) with the pots they will smash. */
+export function spawnGoons(state) {
+  const G = RV.goon;
+  const { xs, pots } = rivalRng(state, (r) => {
+    const found = rivalPots(state, r);
+    return { xs: Array.from({ length: G.count }, () => spawnX(r)), pots: found };
+  });
+  const squad = { size: G.count, down: 0, smashed: 0, beaten: false, queue: pots.map((o) => o.id) };
+  const out = xs.map((x) => ({
+    id: state.nextId++, kind: 'goon', x, y: groundY(state, x), hp: G.hp, state: 'seek', armed: true,
+    squad, cd: 0, alerts: {}, dir: 1, potId: null, workLeft: 0,
+  }));
+  (state.entities || (state.entities = [])).push(...out);
+  return out;
+}
+
+/** 23:00: Dale's roll. Returns what he sent ('poison' | 'tip' | 'pest' | 'goons') or null. */
+export function rollRival(state) {
+  const r = rv(state);
+  const d = rivalRng(state, (rng) => ({ roll: rng.next(), type: rng.next(), goon: rng.next(), src: rng.next(), pick: rng.next() }));
+  const now = nowGhEco(state);
+  if (now < r.frozenUntil || now < r.backOffUntil) return null;
+  if (d.roll >= pctOf(state) || !directorAllows(state, 'rival')) return null;
+  const k = nightKey(state.time);
+  if (r.aggression >= RV.goon.from && d.goon < RV.goon.chance) {
+    directorClaim(state, 'rival');
+    spawnGoons(state);
+    state.events.push({ type: 'hostile', kind: 'rival', night: k });
+    return 'goons';
+  }
+  if (d.type < RV.mix.poison) {
+    directorClaim(state, 'rival');
+    spawnSaboteur(state, 'poison', { source: d.src < 0.5 ? 'tap' : 'barrel' });
+    state.events.push({ type: 'hostile', kind: 'rival', night: k });
+    return 'poison';
+  }
+  if (d.type < RV.mix.poison + RV.mix.tip) {
+    if (r.leverage) {
+      state.events.push({ type: 'toast', msg: 'The tip-off from Dale never came. He knows you have him on camera.' });
+      return null;
+    }
+    directorClaim(state, 'rival');
+    const hh = hs(state);
+    const bribed = state.time.day <= hh.lastBribeDay + CONFIG.heat.raid.tipWindowDays;
+    heatEvent(state, bribed ? 'rivalTipBribed' : 'rivalTip');
+    return 'tip';
+  }
+  const plants = rivalRng(state, (rng) => {
+    const pots = new Set(rivalPots(state, rng).map((o) => o.id));
+    return state.plants.filter((p) => !p.dead && pots.has(p.potId));
+  });
+  if (!plants.length) return null;
+  directorClaim(state, 'rival');
+  spawnSaboteur(state, 'pest', { plantId: plants[Math.floor(d.pick * plants.length)].id });
+  state.events.push({ type: 'hostile', kind: 'rival', night: k });
+  return 'pest';
+}
+
+/** Is the rain barrel/tap water Dale poisoned? Looks cloudy; a pH meter flags it. */
+export const waterPoisoned = (state, source) => !!(rv(state).poison && rv(state).poison.source === source);
+
+/** Dump the poisoned water and refill (plan §A6 counter). */
+export function purgeWater(state) {
+  const r = rv(state);
+  if (!r.poison) return false;
+  if (r.poison.source === 'barrel') { const b = state.objects.find((o) => o.kind === 'barrel'); if (b) b.charges = 0; }
+  r.poison = null;
+  return true;
+}
+
+/** Fit a barrel lock ($40): the saboteur needs 20 s more at the water. */
+export function installBarrelLock(state) {
+  const barrel = state.objects.find((o) => o.kind === 'barrel');
+  if (!barrel || barrel.locked) return { ok: false, msg: 'The barrel is already locked.' };
+  if (!(state.player.inv.barrel_lock > 0)) return { ok: false, msg: 'You have no barrel lock.' };
+  state.player.inv.barrel_lock--;
+  barrel.locked = true;
+  return { ok: true, msg: 'Locked the barrel and tap.' };
+}
+
+const activeGuard = (state) => state.crew && state.crew.members.find((m) => m.role === 'guard' && m.status === 'active');
+const say = (state, line) => (state.sleeping ? tt(state).news.push(line) : state.events.push({ type: 'toast', msg: line }));
+
+function thinkSaboteur(state, e, dt) {
+  const S = RV.saboteur;
+  const p = state.player;
+  e.y = groundY(state, e.x);
+  if (e.state === 'ko') { e.koT -= dt; if (e.koT <= 0) e.gone = true; return; }
+  const prevX = e.x;
+  const seen = e.scared || e.hp < S.hp ||
+    (!state.sleeping && !p.downed && Math.abs(p.x + p.w / 2 - e.x) <= S.seenTiles * TS && hasLos(state, e, p));
+  if (e.state !== 'flee' && seen) { e.state = 'flee'; e.scared = false; } // flees when seen: the job is off
+  if (e.state === 'approach') {
+    let goal = null;
+    if (e.job === 'poison') {
+      const o = state.objects.find((x) => x.kind === e.source);
+      goal = o ? o.x * TS + TS / 2 : null;
+    } else {
+      const pl = state.plants.find((x) => x.id === e.plantId);
+      const pot = pl && state.objects.find((o) => o.id === pl.potId);
+      goal = pot ? pot.x * TS + TS / 2 : null;
+    }
+    if (goal === null) e.state = 'flee';
+    else if (stepToward(e, goal, dt, S.speed)) {
+      const barrel = state.objects.find((o) => o.kind === 'barrel');
+      e.workLeft = e.job === 'poison' ? S.poisonSeconds + (barrel && barrel.locked ? S.barrelLockSeconds : 0) : S.pestSeconds;
+      e.state = 'work';
+    }
+  } else if (e.state === 'work') {
+    e.workLeft -= dt;
+    if (e.workLeft <= 0) {
+      if (e.job === 'poison') rv(state).poison = { source: e.source, pours: RV.poison.pours };
+      else {
+        const pl = state.plants.find((x) => x.id === e.plantId);
+        if (pl && !pl.dead) { pl.infested = true; pl.infestGh = 0; }
+      }
+      e.state = 'flee';
+    }
+  } else if (e.state === 'flee') {
+    if (stepToward(e, T.escapeX * TS, dt, S.speed)) e.gone = true;
+  }
+  if (e.state !== 'ko') {
+    if (e.x !== prevX) checkSecurity(state, e, prevX);
+    else if (e.state === 'work') checkSecurity(state, e, e.x);
+  }
+}
+
+function thinkGoon(state, e, dt) {
+  const G = RV.goon;
+  const p = state.player;
+  e.y = groundY(state, e.x);
+  if (e.state === 'ko') { e.koT -= dt; if (e.koT <= 0) e.gone = true; return; }
+  e.cd -= dt;
+  e.attacked = false;
+  const prevX = e.x;
+  const px = p.x + p.w / 2;
+  const guard = activeGuard(state);
+  let tgt = null;
+  if (!p.downed && Math.abs(px - e.x) <= G.rangeTiles * TS && hasLos(state, e, p)) tgt = 'player';
+  if (guard && Math.abs(guard.x - e.x) <= G.rangeTiles * TS && (!tgt || Math.abs(guard.x - e.x) < Math.abs(px - e.x))) tgt = 'guard';
+  if (tgt) { // stand and fight
+    if (e.cd <= 0) {
+      e.cd = 1 / G.rate;
+      if (tgt === 'player') enemyShoot(state, { x: e.x, y: e.y }, G.dmg, G.acc, 'goon');
+      else if (rivalRng(state, (r) => r.chance(G.acc))) guard.hp -= G.dmg;
+    }
+    e.dir = Math.sign((tgt === 'player' ? px : guard.x) - e.x) || e.dir;
+  } else if (e.state === 'seek') {
+    if (e.potId === null) {
+      e.potId = e.squad.smashed >= G.maxPots ? 0 : (e.squad.queue.shift() || 0);
+      if (!e.potId) e.state = 'flee';
+    }
+    if (e.state === 'seek') {
+      const pot = state.objects.find((o) => o.id === e.potId);
+      if (!pot) e.potId = null;
+      else if (stepToward(e, pot.x * TS + TS / 2, dt, G.speed)) { e.state = 'smash'; e.workLeft = G.smashSeconds; }
+    }
+  } else if (e.state === 'smash') {
+    e.workLeft -= dt;
+    if (e.workLeft <= 0) {
+      const i = state.objects.findIndex((o) => o.id === e.potId);
+      if (i >= 0) {
+        const pot = state.objects[i];
+        const pl = state.plants.find((x) => x.id === pot.plantId);
+        if (pl) state.plants.splice(state.plants.indexOf(pl), 1);
+        state.objects.splice(i, 1);
+        e.squad.smashed++;
+        say(state, 'Dale\'s goons are smashing your pots!');
+      }
+      e.potId = null;
+      e.state = 'seek';
+    }
+  } else if (e.state === 'flee') {
+    if (stepToward(e, T.escapeX * TS, dt, G.speed)) e.gone = true;
+  }
+  if (e.state !== 'ko' && e.x !== prevX) checkSecurity(state, e, prevX);
+}
+
+/** Dale's men that went down count: -20 for a saboteur, -20 for a squad; 3 squads and he backs off. */
+function countBeaten(state, e) {
+  if (e.state !== 'ko' && e.state !== 'dead') return;
+  if (e.kind === 'saboteur' && !e.counted) {
+    e.counted = true;
+    rivalBump(state, RV.beatSaboteur);
+    say(state, 'You caught Dale\'s saboteur. He will think twice.');
+  } else if (e.kind === 'goon' && !e.counted) {
+    e.counted = true;
+    const sq = e.squad;
+    if (++sq.down >= sq.size && !sq.beaten) {
+      sq.beaten = true;
+      const r = rv(state);
+      rivalBump(state, RV.beatGoons);
+      if (++r.squadsBeaten >= RV.goon.backOffSquads) {
+        r.squadsBeaten = 0;
+        r.backOffUntil = nowGhEco(state) + RV.goon.backOffDays * 24;
+        say(state, 'Three squads beaten. Dale backs off for a while.');
+      } else say(state, 'Dale\'s goons are beaten.');
+    }
+  }
+}
+
 /** The 2 Hz threat step (plan §B3: after crew, before addiction). */
 export function stepThreats(state, dt) {
   const t = tt(state);
@@ -442,8 +745,10 @@ export function stepThreats(state, dt) {
   const prev = t.lastHour === null ? cur : t.lastHour;
   t.lastHour = cur;
   if (crossed(prev, cur, BI.rollHour)) rollNight(state);
+  if (crossed(prev, cur, RV.rollHour)) rollRival(state);
   if (crossed(prev, cur, CONFIG.clock.wakeHour)) {
     dogDaily(state);
+    if (state.time.day > RV.dailyAfterDay) rivalBump(state, 1);
     const h = hs(state);
     if (h.officerKilled && !state.gameOver) {
       state.gameOver = { reason: 'fugitive' };
@@ -452,7 +757,12 @@ export function stepThreats(state, dt) {
     }
   }
   const E = state.entities || (state.entities = []);
-  for (const e of E) if (e.kind === 'thief') think(state, e, dt);
+  stepRival(state);
+  for (const e of E) {
+    if (e.kind === 'thief') think(state, e, dt);
+    else if (e.kind === 'saboteur') { thinkSaboteur(state, e, dt); countBeaten(state, e); }
+    else if (e.kind === 'goon') { thinkGoon(state, e, dt); countBeaten(state, e); }
+  }
   if (E.some((e) => e.gone || e.state === 'dead')) {
     state.entities = E.filter((e) => !e.gone && e.state !== 'dead');
   }

@@ -222,9 +222,19 @@ export function createRenderer(canvas) {
       const sx = Math.round(e.rx - cam.rx);
       if (sx < -16 || sx > W) continue;
       const feet = Math.round(e.y - cam.ry);
-      ctx.fillStyle = e.biker ? '#5a3a1e' : '#7a2e2e';
+      ctx.fillStyle = e.biker ? '#5a3a1e' : e.kind === 'goon' ? '#3a2e5a' : e.kind === 'saboteur' ? '#4a4a4a' : '#7a2e2e';
       if (e.state === 'ko') ctx.fillRect(sx - 11, feet - 6, 22, 6);
       else ctx.fillRect(sx - 6, feet - 22, 12, 22);
+    }
+    // Crew (M6): runners (blue), the guard (green), the gardener (olive).
+    const colors = { runner: '#3a7fc4', guard: '#2f8f4a', gardener: '#8a9a2f' };
+    for (const m of (state.crew && state.crew.members) || []) {
+      if (m.status !== 'active') continue;
+      const sx = Math.round(m.x - cam.rx);
+      if (sx < -16 || sx > W) continue;
+      const feet = Math.round((m.role === 'gardener' ? m.y + TS : state.surface[Math.max(0, Math.min(399, (m.x / TS) | 0))] * TS) - cam.ry);
+      ctx.fillStyle = colors[m.role];
+      ctx.fillRect(sx - 6, feet - 22, 12, 22);
     }
     const dog = state.threats && state.threats.dog;
     if (dog) {

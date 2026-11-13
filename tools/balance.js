@@ -23,7 +23,7 @@ import { stepSim } from '../src/sim/sim.js';
 import { setTile, T } from '../src/world/tiles.js';
 import { heatTier } from '../src/sim/heat.js';
 import {
-  stepPlants, plantSeed, canHarvest, harvestPlant, waterPour, feedDose, phAdjust, stageOf,
+  stepPlants, plantSeed, canHarvest, harvestPlant, waterPour, feedDose, phAdjust, stageOf, neemPlant,
 } from '../src/sim/plants.js';
 import {
   stepEconomy, addProduct, loadRack, unloadRack, rackFreeSlots, buyItem, shopOpen,
@@ -31,7 +31,7 @@ import {
   carriedGrams, carryCap, BUYER_KEYS, askAround,
 } from '../src/sim/economy.js';
 import { stepSpawn } from '../src/entities/spawn.js';
-import { installLock } from '../src/sim/threats.js';
+import { installLock, waterPoisoned, purgeWater } from '../src/sim/threats.js';
 
 const B = CONFIG.balance;
 const P = CONFIG.plants;
@@ -63,9 +63,14 @@ export function runBalance(seed = 1, days = B.days, { quiet = false, heat = fals
 
   function tend() {
     const inv = s.player.inv;
+    if (waterPoisoned(s, 'tap')) purgeWater(s); // M6: the pH meter flags Dale's poison; the bot dumps it
     for (const pl of s.plants) {
       if (pl.dead) continue;
-      if (pl.moisture < B.waterAt) waterPour(s, pl, P.tapPourPh);
+      if (pl.infested) { // M6: neem cures the pest jar
+        if (!(inv.neem > 0)) buyAnytime('neem');
+        if (inv.neem > 0) { inv.neem--; neemPlant(s, pl); }
+      }
+      if (pl.moisture < B.waterAt) waterPour(s, pl, P.tapPourPh, 'tap');
       if (pl.nutrients < B.feedAt && stageOf(pl) !== 'ripe') {
         if (!(inv.nutrients > 0)) buyAnytime('nutrients');
         if (inv.nutrients > 0) { inv.nutrients--; feedDose(s, pl); }

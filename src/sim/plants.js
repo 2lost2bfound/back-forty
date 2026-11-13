@@ -139,8 +139,10 @@ export function createPlant(state, pot, strainKey, genome) {
     ticks: 0,              // lifetime gh
     dryHours: 0,           // consecutive gh at moisture 0
     darkGh: 0,             // consecutive gh an indoor plant had no light
-    infested: false,       // M6 sabotage
+    infested: false,       // M6 pest jar
+    infestGh: 0,           // gh since the mites last spread
     poisonedHours: 0,      // M6 poisoned water
+    gardened: false,       // M6: the gardener is tending it (care capped)
     dead: false,
   };
   state.plants.push(plant);
@@ -176,6 +178,8 @@ export function stressorsOf(plant) {
     s.push(plant.ph < P.phMild.lo || plant.ph > P.phMild.hi ? 'phSevere' : 'phMild');
   }
   if ((plant.darkGh || 0) >= P.darkStressGh) s.push('noLight');
+  if (plant.infested) s.push('pest');
+  if (plant.poisonedHours > 0) s.push('poisoned');
   if (plant.nutrients < P.nutrientStress.lo) s.push('nutrientLow');
   else if (plant.nutrients > P.nutrientStress.hi) s.push('nutrientHigh');
   return s;
@@ -244,16 +248,29 @@ export function stepPlants(state, gh) {
     const stressors = stressorsOf(plant);
     if (stressors.length > 0) {
       let dmg = 0;
-      for (const k of stressors) dmg += P.stressDamage[k];
-      plant.health -= dmg * resilienceMult(plant.genome) * gh;
+      for (const k of stressors) if (k !== 'pest') dmg += P.stressDamage[k];
+      // Mites deal a flat 3 health/gh (plan §A6); resilience only softens stress.
+      plant.health -= (dmg * resilienceMult(plant.genome) + (plant.infested ? P.stressDamage.pest : 0)) * gh;
       if (plant.health <= 0) { killPlant(state, plant, 'stress'); continue; }
     } else {
       plant.health = Math.min(100, plant.health + P.healthRegen * gh);
     }
 
-    // Lifetime bookkeeping (mean health, care fraction).
+    // Mites spread to the nearest plant within 2 tiles; poison wears off.
+    if (plant.infested) {
+      plant.infestGh = (plant.infestGh || 0) + gh;
+      if (plant.infestGh >= P.pest.spreadGh) { plant.infestGh = 0; spreadPests(state, plant, pot); }
+    }
+    if (plant.poisonedHours > 0) plant.poisonedHours = Math.max(0, plant.poisonedHours - gh);
+
+    // Lifetime bookkeeping (mean health, care fraction). While the gardener
+    // tends a plant its care fraction cannot climb above his cap (plan §A8).
     plant.healthSum += plant.health * gh;
-    if (stressors.length === 0) plant.careTicks += gh;
+    if (stressors.length === 0) {
+      plant.careTicks += plant.gardened
+        ? Math.min(gh, Math.max(0, CONFIG.crew.gardener.careCap * (plant.ticks + gh) - plant.careTicks))
+        : gh;
+    }
     plant.ticks += gh;
 
     // Growth: progress only accrues in light; the ripe clock is wall-clock gh.
@@ -272,10 +289,35 @@ export function stepPlants(state, gh) {
 
 // -------------------------------------------------------------- tending ---
 
-/** One watering-can pour: +35 moisture plus the source water's pH. */
-export function waterPour(state, plant, pourPh) {
+/** One watering-can pour: +35 moisture plus the source water's pH. `source`
+ *  ('tap' | 'barrel') lets Dale's poisoned water bite (plan §A6). */
+export function waterPour(state, plant, pourPh, source) {
   plant.moisture = Math.min(100, plant.moisture + P.pourMoisture);
   plant.ph = clamp(plant.ph + pourPh, 4, 8);
+  const poison = state.threats && state.threats.rival && state.threats.rival.poison;
+  if (poison && poison.source === source && poison.pours > 0) {
+    const X = CONFIG.threats.rival.poison;
+    plant.ph = clamp(plant.ph + X.ph, 4, 8);
+    plant.poisonedHours = X.stressGh;
+    if (--poison.pours <= 0) state.threats.rival.poison = null;
+  }
+}
+
+/** Neem spray cures one plant (plan §A6 pest jar). */
+export function neemPlant(state, plant) {
+  plant.infested = false;
+  plant.infestGh = 0;
+}
+
+function spreadPests(state, from, fromPot) {
+  let best = null, bd = P.pest.spreadTiles;
+  for (const other of state.plants) {
+    if (other === from || other.dead || other.infested) continue;
+    const pot = potOf(state, other);
+    const d = pot && Math.hypot(pot.x - fromPot.x, pot.y - fromPot.y);
+    if (pot && d <= bd) { bd = d; best = other; }
+  }
+  if (best) { best.infested = true; best.infestGh = 0; }
 }
 
 /** One nutrient dose: +30 nutrients, -0.2 pH. */

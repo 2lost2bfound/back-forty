@@ -11,3 +11,4 @@ import './save.test.js';
 import './economy.test.js';
 import './heat.test.js';
 import './threats.test.js';
+import './crew.test.js';

@@ -204,7 +204,7 @@ export const CONFIG = {
     // One-off sources other milestones call through heatEvent(state, key).
     events: {
       runnerBusted: 10, runnerSnitch: 20, patrolStop: 10,
-      killCriminal: 8, killCivilian: 40, collapse: 5, rivalTip: 15, favor: -1,
+      killCriminal: 8, killCivilian: 40, collapse: 5, rivalTip: 15, rivalTipBribed: 8, favor: -1,
       shootOfficer: 50,
       gunshotLot: { per: 1, max: 8, suppressed: 0.25 },
       gunshotTown: { per: 4, max: 20, suppressed: 4 },
@@ -303,7 +303,8 @@ export const CONFIG = {
     nutrientIdeal:  { lo: 40, hi: 80 },
     nutrientStress: { lo: 20, hi: 90 },
     // Stress damage per gh per stressor, before the resilience multiplier.
-    stressDamage: { moisture: 3, phMild: 1, phSevere: 3, nutrientLow: 1.5, nutrientHigh: 2.5, noLight: 2 },
+    stressDamage: { moisture: 3, phMild: 1, phSevere: 3, nutrientLow: 1.5, nutrientHigh: 2.5, noLight: 2, pest: 3, poisoned: 3 },
+    pest: { spreadGh: 12, spreadTiles: 2 }, // mites jump to the nearest plant within 2 tiles every 12 gh
     darkStressGh: 24,      // indoor plant with no light this long takes stress
     healthRegen: 1,        // +1 health per gh with zero stressors
     dieAtZeroMoistureGh: 6,// at moisture 0 for 6 gh straight the plant dies
@@ -319,7 +320,7 @@ export const CONFIG = {
     // Drying: 24 gh on a rack; wet sells at half price; rack holds 4 batches.
     dryHours: 24, rackCapacity: 4, wetPriceMult: 0.5,
     // Tending action times in seconds (plan §A4), before mastery/tired.
-    actionSeconds: { water: 0.6, feed: 0.8, ph: 0.8, plant: 1, harvest: 2, refill: 1 },
+    actionSeconds: { water: 0.6, feed: 0.8, ph: 0.8, plant: 1, harvest: 2, refill: 1, neem: 1 },
   },
 
   // Economy (plan §A7). M3: five buyers, orders, trust, discovery, street
@@ -345,7 +346,7 @@ export const CONFIG = {
       filter: 200, generator: 900, wood: 2, concrete_tile: 5, ladder: 5,
       door: 20, padlock: 50, deadbolt: 200, steeldoor: 800, dog: 300, hatch: 600, stash: 80, tripwire: 30, floodlight: 120,
       camera: 250, pickaxe: 80, cart: 150, bicycle: 200, duffel: 100,
-      barrel_lock: 40,
+      barrel_lock: 40, truce: 2000,
       bat: 40, pistol22: 350, pistol9: 700, shotgun: 1200, rifle: 2000,
       ammo_22: 10, ammo_9: 15, ammo_shell: 15, ammo_rifle: 16,
       scanner: 250, safe: 500, bandage: 20, suppressor: 900,
@@ -369,12 +370,12 @@ export const CONFIG = {
         'ammo_shell', 'ammo_rifle', 'scanner', 'safe', 'bandage'],
       walt: ['dog'],
       alley: ['pistol22', 'pistol9', 'shotgun', 'rifle', 'suppressor'],
-      bar: ['drink', 'rumor', 'ask_around', 'bribe'],
+      bar: ['drink', 'rumor', 'ask_around', 'bribe', 'truce'],
       clinic: ['heal', 'vet', 'detox', 'taper'],
       townhall: ['lawyer', 'permit'],
     },
     unregStock: ['pistol22', 'pistol9', 'shotgun', 'rifle'],
-    services: ['dog', 'drink', 'rumor', 'ask_around', 'bribe', 'heal', 'vet', 'detox', 'taper', 'lawyer', 'permit'],
+    services: ['dog', 'drink', 'rumor', 'ask_around', 'bribe', 'heal', 'vet', 'detox', 'taper', 'lawyer', 'permit', 'truce'],
 
     // Carry limits (plan §A5 patrol stops): grams of product on you.
     carry: { backpack: 500, duffel: 2000 },
@@ -506,6 +507,42 @@ export const CONFIG = {
       food: 10, hungryDays: 2, thiefBiteStagger: 0.6,
     },
     fugitive: { hour: 6 },
+    // Rival: Dale Pruitt (plan §A6). Aggression 0-100; the nightly roll at 23:00.
+    rival: {
+      start: 10, max: 100, rollHour: 23, chancePerPoint: 0.5, maxChance: 50, // percent
+      dailyAfterDay: 10, trust3Bump: 2, defectBump: 10, beatSaboteur: -20, beatGoons: -20,
+      tribute: { cost: 300, drop: 10, everyDays: 7 },
+      truce: { cost: 2000, minAggression: 60, setTo: 10, frozenDays: 10 },
+      mix: { poison: 0.4, tip: 0.3 },     // the rest is the pest jar
+      saboteur: { hp: 50, speed: 100, seenTiles: 8, poisonSeconds: 10, pestSeconds: 4, barrelLockSeconds: 20 },
+      poison: { pours: 8, ph: 1.0, stressGh: 6 },
+      goon: {
+        from: 70, chance: 0.25, count: 2, hp: 80, dmg: 12, acc: 0.55, rate: 1, speed: 90,
+        rangeTiles: 12, smashSeconds: 3, maxPots: 6, backOffSquads: 3, backOffDays: 10,
+      },
+    },
+  },
+
+  // Crew (plan §A8): six candidates, four seats, wages at 20:00, loyalty.
+  crew: {
+    max: 4, candidates: 6, boardVisible: 2, boardRotateDays: 3, revealDays: 3, payHour: 20,
+    names: ['Dusty', 'Lou', 'Marcy', 'Pete', 'Rosa', 'Cal', 'Nell', 'Tuck', 'Ines', 'Walt Jr.', 'Bo', 'Fern'],
+    statMin: 10, statMax: 90, adjectiveSplit: 50,
+    adjectives: { rel: ['flaky', 'dependable'], disc: ['chatty', 'careful'], greed: ['modest', 'hungry'], nerve: ['jumpy', 'cool'] },
+    startLoyalty: 50, wage: { runner: 60, guard: 120, gardener: 90 }, runnerCut: 0.05, dockWageMult: 0.8,
+    loyalty: { paid: 2, bonus: 5, unpaid: -15, withdrawal: -10, raid: -5, crewBusted: -8, threatened: -20, dock: -10, bail: 10 },
+    bonus: { cost: 100, everyDays: 3 },
+    runner: {
+      speed: 90, bustBase: 1, bustHeatDiv: 10, bustDisc: 150, heavyG: 200, heavyMult: 1.5, snitchBelow: 40,
+      lateDiv: 4, robG: 300, robChance: 0.05, hurtDays: 2, bail: 800, jailDays: 5, jailLoyalty: -30, goneBelow: 20,
+      skimMin: 0.05, skimMax: 0.15, threatenDays: 10, threatenQuit: 0.2,
+    },
+    quit: { below: 20, chance: 0.25, sellout: 0.3, breakIn: 15, breakInNights: 5, daleBump: 10 },
+    guard: { hp: 100, dmg: 12, acc: 0.7, rate: 1, rangeTiles: 9, aggroTiles: 16, speed: 70, hurtDays: 2, markers: [44, 70] },
+    gardener: {
+      plants: 20, careCap: 0.85, actionsPerGh: 20,
+      moistureBelow: 45, nutrientsBelow: 45, phMargin: 0.1,
+    },
   },
 
   // Inventory items (display names for HUD/hotbar/menus).
@@ -529,7 +566,7 @@ export const CONFIG = {
     scanner: 'Police scanner', safe: 'Safe', bandage: 'Bandage', suppressor: 'Suppressor',
     drink: 'Drink', rumor: 'Rumor', bribe: 'Bribe the deputy', ask_around: 'Ask around for buyers',
     heal: 'Full heal', vet: 'Vet', detox: 'Detox', taper: 'Taper kit (1 day)',
-    lawyer: 'Lawyer retainer (1 day)', permit: 'Farm-stand permit',
+    lawyer: 'Lawyer retainer (1 day)', permit: 'Farm-stand permit', truce: 'Truce with Dale',
   },
 
   // Headless balance bot policy (tools/balance.js, My Addition 11).

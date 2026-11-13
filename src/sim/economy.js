@@ -13,6 +13,7 @@ import { CONFIG } from '../config.js';
 import { withStateRng } from '../rng.js';
 import { rollSeedGenome } from './genetics.js';
 import { canBuyDog, giveDog, dogHurt, healDog } from '../entities/dog.js';
+import { buyTruce } from './threats.js';
 import {
   addHeat, heatTier, noteSale, noteSpend, bribeDeputy, bribePrice, hireLawyer, rumorText,
 } from './heat.js';
@@ -85,6 +86,7 @@ export function buyItem(state, key, shopKey = 'hardware') {
   if (!shopOpen(state.time, shopKey)) return { ok: false, msg: `${E[shopKey].label} is closed.` };
   const p = state.player;
   if (key === 'bribe') return bribeDeputy(state);
+  if (key === 'truce') return buyTruce(state);
   if (key === 'dog' && !canBuyDog(state)) return { ok: false, msg: 'You already have a dog.' };
   if (key === 'vet' && !dogHurt(state)) return { ok: false, msg: 'Your dog is fine.' };
   if (p.cash < entry.price) return { ok: false, msg: 'Not enough cash.' };
@@ -239,9 +241,9 @@ export function trustLevel(pts) {
 
 export const buyerLevel = (state, key) => trustLevel(state.economy.buyers[key].pts);
 
-function ledger(state, text, amount = 0) {
+function ledger(state, text, amount = 0, extra) {
   const L = state.economy.ledger;
-  L.push({ day: state.time.day, hour: Math.floor(state.time.hour), text, amount });
+  L.push({ day: state.time.day, hour: Math.floor(state.time.hour), text, amount, ...extra });
   while (L.length > E.ledgerMax) L.shift();
 }
 
@@ -312,13 +314,13 @@ export function buyerMult(state, key) {
 }
 
 /** Preview/execute: grams you can deliver and the payout. */
-export function fillQuote(state, order) {
+export function fillQuote(state, order, stock = fillStock(state, order)) {
   const mult = buyerMult(state, order.buyer);
   let left = order.grams;
   let grams = 0;
   let value = 0;
   let qsum = 0;
-  for (const b of fillStock(state, order)) {
+  for (const b of stock) {
     const g = Math.min(left, b.grams);
     grams += g; left -= g;
     value += g * pricePerGram(b) * mult;
@@ -334,46 +336,52 @@ export function fillQuote(state, order) {
  * full on time +10 (+5 if quality is 20+ over the minimum), partial on time
  * +3, late (within grace) 0.
  */
-export function fillOrder(state, orderId) {
+export function fillOrder(state, orderId, opts = {}) {
   const order = state.economy.orders.find((o) => o.id === orderId);
   if (!order) return { ok: false, msg: 'No such order.' };
   const key = order.buyer;
   const def = E.buyers[key];
-  if (!buyerPresent(state, key)) return { ok: false, msg: `${def.name} isn't here.` };
-  const q = fillQuote(state, order);
+  // A runner (M6) delivers from his own bag: opts.stock, opts.late (he dawdled),
+  // opts.cut (the share he skims off the payment).
+  if (!opts.runner && !buyerPresent(state, key)) return { ok: false, msg: `${def.name} isn't here.` };
+  const stock = opts.stock || fillStock(state, order);
+  const q = fillQuote(state, order, stock);
   if (q.grams < order.grams * TR.partialMin) {
     return { ok: false, msg: `Need at least ${Math.ceil(order.grams * TR.partialMin)} g of q${order.minQ}+ dry product.` };
   }
   // Consume, best quality first (same order the quote used).
   let left = q.grams;
-  for (const b of fillStock(state, order)) {
+  for (const b of stock) {
     const g = Math.min(left, b.grams);
     b.grams -= g; left -= g;
     if (b.grams <= 1e-6) state.product.splice(state.product.indexOf(b), 1);
     if (left <= 1e-9) break;
   }
   const bs = state.economy.buyers[key];
-  const late = nowGh(state) > order.deadline;
+  if (!opts.runner) bs.personal = true; // you have sold to them yourself (ledger shows "expected")
+  const late = !!opts.late || nowGh(state) > order.deadline;
   const partial = q.grams < order.grams - 1e-9;
   let pts = TR.late;
   if (!late) {
     pts = partial ? TR.partial : TR.full + (q.quality >= order.minQ + TR.qualityBonusOver ? TR.qualityBonus : 0);
   }
   const lvl = trustLevel(bs.pts);
-  state.player.cash += q.value;
-  state.economy.gross += q.value;
+  const paid = q.value * (1 - (opts.cut || 0));
+  state.player.cash += paid;
+  state.economy.gross += paid;
   if (def.heat) addHeat(state, E.saleHeat[lvl], `Sale to ${def.name}`);
   noteSale(state);
   bs.pts += pts;
   bs.streak = 0;
   state.economy.orders.splice(state.economy.orders.indexOf(order), 1);
   const outcome = late ? 'late' : partial ? 'partial' : 'full';
-  ledger(state, `${def.name}: ${outcome} order, ${q.grams.toFixed(0)} g`, q.value);
+  ledger(state, `${def.name}: ${outcome} order, ${q.grams.toFixed(0)} g${opts.runner ? ` (${opts.runner})` : ''}`, paid,
+    { buyer: key, expected: q.value });
   state.events.push({
-    type: 'sale', buyer: def.name, grams: q.grams, value: q.value, outcome, pts,
+    type: 'sale', buyer: def.name, grams: q.grams, value: paid, outcome, pts,
   });
   checkReferrals(state, key);
-  return { ok: true, outcome, pts, value: q.value, grams: q.grams };
+  return { ok: true, outcome, pts, value: q.value, paid, grams: q.grams };
 }
 
 function missOrder(state, order) {

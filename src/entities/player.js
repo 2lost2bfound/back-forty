@@ -26,14 +26,14 @@ import * as plants from '../sim/plants.js';
 import * as economy from '../sim/economy.js';
 import { pedNear } from './npc.js';
 import { isWeapon, attack, startReload, useBandage } from './combat.js';
-import { installLock, canPlaceCamera } from '../sim/threats.js';
+import { installLock, canPlaceCamera, waterPoisoned, purgeWater, installBarrelLock } from '../sim/threats.js';
 
 const TS = CONFIG.world.tile;
 const PS = CONFIG.plants;
 const SHOP_KEYS = ['hardware', 'walt', 'pawn', 'clinic', 'townhall', 'bar', 'alley'];
 
 // Hotbar items that tend a plant with the primary (left) click.
-const TEND_KEYS = { can: 'water', nutrients: 'feed', phkit: 'ph' };
+const TEND_KEYS = { can: 'water', nutrients: 'feed', phkit: 'ph', neem: 'neem' };
 
 // Objects placed with right click (M4 adds lamps, hiding and stash gear).
 export const PLACEABLE = ['pot', 'rack', 'lamp_cfl', 'lamp_hps', 'lamp_led', 'filter',
@@ -113,7 +113,7 @@ export function cycleHotbar(state, dir) {
 export function assignHotbar(state, index, key) {
   const p = state.player;
   if (PLACEABLE.includes(key) || isWeapon(key) || key === 'bandage' || key === 'soil_potting' || key === 'soil_living' ||
-      key === 'can' || key === 'nutrients' || key === 'phkit') {
+      key === 'can' || key === 'nutrients' || key === 'phkit' || key === 'neem') {
     p.hotbar[index] = { kind: 'item', key };
   } else if (key === 'dirt' || key === 'wood' || key === 'ladder') {
     const ids = { dirt: T.DIRT, wood: T.WOOD, ladder: T.LADDER };
@@ -253,7 +253,7 @@ function completeAction(state, a) {
     case 'water': {
       if (!plant || plant.dead) return;
       const ph = state.player.canWater === 'barrel' ? PS.barrelPourPh : PS.tapPourPh;
-      plants.waterPour(state, plant, ph);
+      plants.waterPour(state, plant, ph, state.player.canWater);
       state.player.canCharges--;
       state.events.push({ type: 'action', name: 'pour' });
       break;
@@ -263,6 +263,13 @@ function completeAction(state, a) {
       if ((state.player.inv.nutrients || 0) <= 0) return;
       state.player.inv.nutrients--;
       plants.feedDose(state, plant);
+      state.events.push({ type: 'action', name: 'feed' });
+      break;
+    }
+    case 'neem': {
+      if (!plant || plant.dead || (state.player.inv.neem || 0) <= 0) return;
+      state.player.inv.neem--;
+      plants.neemPlant(state, plant);
       state.events.push({ type: 'action', name: 'feed' });
       break;
     }
@@ -330,6 +337,10 @@ function tryPrimary(state, p, inp) {
         }
         if (tendKind === 'feed' && !(p.inv.nutrients > 0)) {
           state.events.push({ type: 'toast', msg: 'No nutrient doses left.' });
+          return;
+        }
+        if (tendKind === 'neem' && !(p.inv.neem > 0)) {
+          state.events.push({ type: 'toast', msg: 'No neem oil left.' });
           return;
         }
         if (tendKind === 'ph' && !(p.inv.phkit > 0)) {
@@ -571,8 +582,12 @@ export function interactHint(state) {
       if (wet) return 'E: Hang a batch to dry';
       return null;
     }
-    case 'tap': return state.player.canCharges < PS.canCapacity ? 'E: Refill the can (tap)' : null;
-    case 'barrel': return state.player.canCharges < PS.canCapacity ? 'E: Refill the can (barrel)' : null;
+    case 'tap': case 'barrel': {
+      if (waterPoisoned(state, t.kind)) return `The water is cloudy${inv.ph_meter ? ' (the pH meter flags it)' : ''}. E: Dump it and refill`;
+      if (t.kind === 'barrel' && inv.barrel_lock > 0 && !t.obj.locked) return 'E: Lock the barrel and tap';
+      if (state.player.canCharges >= PS.canCapacity) return null;
+      return `E: Refill the can (${t.kind})`;
+    }
     case 'bed': return 'E: Sleep until 6:00';
     case 'shop': {
       const sh = CONFIG.economy[t.shop];
@@ -640,13 +655,18 @@ export function handleInteract(state) {
       break;
     }
     case 'tap':
-      if (p.canCharges < PS.canCapacity) {
-        p.action = { kind: 'refill', t: 0, dur: actionDuration(state, PS.refillSeconds), source: 'tap' };
-      }
-      break;
     case 'barrel':
+      if (waterPoisoned(state, t.kind)) {
+        purgeWater(state);
+        state.events.push({ type: 'toast', msg: 'You dump the cloudy water. The source is clean again.' });
+        break;
+      }
+      if (t.kind === 'barrel' && p.inv.barrel_lock > 0 && !obj.locked) {
+        state.events.push({ type: 'toast', msg: installBarrelLock(state).msg });
+        break;
+      }
       if (p.canCharges < PS.canCapacity) {
-        p.action = { kind: 'refill', t: 0, dur: actionDuration(state, PS.refillSeconds), source: 'barrel', objId: obj.id };
+        p.action = { kind: 'refill', t: 0, dur: actionDuration(state, PS.refillSeconds), source: t.kind, objId: obj.id };
       }
       break;
     case 'bed': {

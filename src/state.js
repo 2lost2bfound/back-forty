@@ -15,6 +15,7 @@ import { createPlayer, combatFields } from './entities/player.js';
 import { initEconomy } from './sim/economy.js';
 import { initHeatState } from './sim/heat.js';
 import { initThreats } from './sim/threats.js';
+import { initCrew } from './sim/crew.js';
 
 export const SAVE_PREFIX = 'backforty';
 export const slotKey = (n) => `${SAVE_PREFIX}.slot${n}`;
@@ -48,7 +49,8 @@ export function newGame(seed) {
     economy: initEconomy({ day: CONFIG.clock.startDay, hour: CONFIG.clock.startHour }),
     heat: 0,                    // the meter (0-100); everything else is heatState
     heatState: initHeatState({ hour: CONFIG.clock.startHour }),
-    threats: initThreats(seed), // director, lock, dog, feud (saved)
+    threats: initThreats(seed), // director, lock, dog, feud, rival (saved)
+    crew: initCrew(seed),       // candidates and hired help (saved)
     entities: [],               // runtime: thieves/bikers
     bullets: [],                // runtime: the player's pooled bullets
     gameOver: null,             // { reason } once a lose condition fires
@@ -182,6 +184,7 @@ export function serializeState(state) {
     heat: state.heat,
     heatState: state.heatState,
     threats: state.threats,
+    crew: state.crew,
     gameOver: state.gameOver,
   });
 }
@@ -225,6 +228,7 @@ export function deserializeState(json) {
     // Saves from before M4 have no heatState: start it fresh at the saved clock.
     heatState: o.heatState || initHeatState(o.time),
     threats: o.threats || initThreats(o.seed),
+    crew: o.crew || initCrew(o.seed),
     entities: [],
     bullets: [],
     gameOver: o.gameOver || null,

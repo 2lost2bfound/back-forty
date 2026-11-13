@@ -705,3 +705,370 @@ test('balance bot with threats: 45 days still reach the end and report', () => {
   assert.ok(rows.length >= 40 || rows[rows.length - 1].arrests >= 0);
   assert.ok(rows[rows.length - 1].gross > 5000);
 });
+
+// ==================================================== M6: Dale Pruitt ====
+
+import { createRng as rngFrom } from '../src/rng.js';
+import {
+  rv, rollRival, rivalBump, rivalChance, payTribute, buyTruce, spawnSaboteur, spawnGoons, waterPoisoned,
+  purgeWater, installBarrelLock,
+} from '../src/sim/threats.js';
+import { waterPour, neemPlant, stepPlants, stressorsOf } from '../src/sim/plants.js';
+import { hire, stepCrew, crewOf, placeMarker } from '../src/sim/crew.js';
+import { bribeDeputy } from '../src/sim/heat.js';
+
+const RV = CONFIG.threats.rival;
+
+/** Make Dale's next roll satisfy pred({roll, type, goon, src, pick}). */
+function forceRival(s, pred) {
+  for (let st = 1; st < 200000; st++) {
+    const r = rngFrom(st);
+    const d = { roll: r.next(), type: r.next(), goon: r.next(), src: r.next(), pick: r.next() };
+    if (pred(d)) { rv(s).rngState = st; return; }
+  }
+  throw new Error('no seed');
+}
+const POISON = { roll: (d) => d.roll < 0.01, poison: (d) => d.type < 0.4, tip: (d) => d.type >= 0.4 && d.type < 0.7, pest: (d) => d.type >= 0.7 };
+const night = (s, day = 9, aggr = 50) => { at(s, day, 22.9); rv(s).aggression = aggr; };
+const rollAt23 = (s) => { s.time.hour = 23.05; return rollRival(s); };
+const ents = (s, kind) => s.entities.filter((e) => e.kind === kind);
+
+test('Dale: aggression starts at 10; +1 per day after day 10; trust 3 +2 once per buyer', () => {
+  const s = game();
+  assert.equal(rv(s).aggression, 10);
+  at(s, 10, 5.9);
+  s.time.hour = 6.05; stepThreats(s, 0.5);
+  assert.equal(rv(s).aggression, 10, 'day 10 itself does not count');
+  at(s, 11, 5.9);
+  s.time.hour = 6.05; stepThreats(s, 0.5);
+  assert.equal(rv(s).aggression, 11);
+  s.economy.buyers.marla.pts = 60;                  // trust level 3
+  stepThreats(s, 0.5); stepThreats(s, 0.5);
+  assert.equal(rv(s).aggression, 13, '+2 once');
+  s.economy.buyers.marla.pts = 100;                 // level 4: no second bump
+  stepThreats(s, 0.5);
+  assert.equal(rv(s).aggression, 13);
+});
+
+test('Dale: taking one of his buyers is +5 each (the M3 hook feeds the real model)', () => {
+  const s = game();
+  s.economy.daleAggression += CONFIG.economy.miss.daleAggression;   // Big Tone found another supplier
+  stepThreats(s, 0.5);
+  assert.equal(rv(s).aggression, 15);
+  s.economy.daleAggression += CONFIG.economy.miss.daleAggression;   // and Vivian
+  stepThreats(s, 0.5); stepThreats(s, 0.5);
+  assert.equal(rv(s).aggression, 20);
+});
+
+test('Dale: beating his saboteur is -20; tribute -10 weekly; truce sets 10 and freezes 10 days', () => {
+  const s = game();
+  rv(s).aggression = 50;
+  at(s, 9, 3);
+  const e = spawnSaboteur(s, 'poison');
+  damageEntity(s, e, 999, 'melee');
+  stepThreats(s, 0.5); stepThreats(s, 0.5);
+  assert.equal(rv(s).aggression, 30, 'counted once');
+  assert.equal(payTribute(s).ok, true);
+  assert.equal(rv(s).aggression, 20);
+  assert.equal(s.player.cash, 10000 - 300);
+  assert.equal(payTribute(s).ok, false, 'weekly');
+  at(s, 9 + 7, 12);
+  assert.equal(payTribute(s).ok, true);
+  assert.equal(rv(s).aggression, 10);
+  rv(s).aggression = 59;
+  assert.equal(buyTruce(s).ok, false, 'needs 60+');
+  rv(s).aggression = 60;
+  const cash = s.player.cash;
+  assert.equal(buyTruce(s).ok, true);
+  assert.equal(s.player.cash, cash - 2000);
+  assert.equal(rv(s).aggression, 10);
+  rivalBump(s, 5);
+  assert.equal(rv(s).aggression, 10, 'frozen: gains are ignored');
+  at(s, 9 + 7 + 11, 12);
+  rivalBump(s, 5);
+  assert.equal(rv(s).aggression, 15, 'thawed after 10 days');
+});
+
+test('truce is bought at the bar and blocks his rolls while it holds', () => {
+  const s = game();
+  at(s, 20, 18);
+  rv(s).aggression = 80;
+  assert.ok(buyItem(s, 'truce', 'bar').ok);
+  forceRival(s, (d) => POISON.roll(d));
+  night(s, 22, 10);
+  rv(s).frozenUntil = nowGh(s) + 100;
+  assert.equal(rollAt23(s), null);
+});
+
+test('nightly roll: aggression x 0.5%, capped at 50%', () => {
+  const s = game();
+  rv(s).aggression = 10; assert.ok(Math.abs(rivalChance(s) - 0.05) < 1e-12);
+  rv(s).aggression = 70; assert.ok(Math.abs(rivalChance(s) - 0.35) < 1e-12);
+  rv(s).aggression = 100; assert.equal(rivalChance(s), 0.5);
+  night(s, 9, 20);
+  forceRival(s, (d) => d.roll >= 0.1 && d.roll < 0.2);      // 10% needed to fire at 20 aggression
+  assert.equal(rollAt23(s), null, 'above 20 x 0.5% = 10%: nothing');
+  night(s, 11, 20);
+  forceRival(s, (d) => d.roll < 0.1 && POISON.poison(d));
+  assert.equal(rollAt23(s), 'poison');
+});
+
+test('director: Dale is not active before night 8, one hostile event a night, quiet night after', () => {
+  const s = game();
+  forceRival(s, (d) => d.roll < 0.01 && POISON.pest(d));
+  night(s, 6, 100);
+  assert.equal(rollAt23(s), null, 'too early (night 7)');
+  night(s, 7, 100);
+  forceRival(s, (d) => d.roll < 0.01 && POISON.tip(d));
+  assert.equal(rollAt23(s), 'tip');
+  assert.equal(tt(s).hostile[8], 'rival');
+  assert.equal(directorAllows(s, 'thief'), false, 'no thief on the same night');
+  night(s, 8, 100);
+  forceRival(s, (d) => d.roll < 0.01 && POISON.tip(d));
+  assert.equal(rollAt23(s), null, 'the night after is quiet');
+  night(s, 9, 100);
+  forceRival(s, (d) => d.roll < 0.01 && POISON.tip(d));
+  assert.equal(rollAt23(s), 'tip');
+});
+
+test('stepThreats rolls Dale at 23:00 through the director', () => {
+  const s = game();
+  night(s, 10, 100);
+  forceRival(s, (d) => d.roll < 0.01 && POISON.poison(d));
+  s.time.hour = 23.02;
+  stepThreats(s, 0.5);
+  assert.equal(ents(s, 'saboteur').length, 1);
+  assert.equal(tt(s).history.at(-1).kind, 'rival');
+});
+
+// ---- poisoned water ----------------------------------------------------
+
+test('poisoned water: the saboteur needs 10 s at the tap (+20 s with a barrel lock); 8 pours add +1.0 pH and 6 gh of severe stress', () => {
+  const secs = (locked) => {
+    const s = game();
+    at(s, 10, 0);
+    s.player.x = 100 * TS;
+    if (locked) { s.player.inv.barrel_lock = 1; assert.ok(installBarrelLock(s).ok); }
+    const e = spawnSaboteur(s, 'poison', { source: 'tap' });
+    e.x = 40 * TS;
+    // walk there first, then time only the work
+    run(s, () => e.state === 'work', 60);
+    return run(s, () => !!rv(s).poison, 100);
+  };
+  const open = secs(false);
+  const lock = secs(true);
+  assert.ok(Math.abs(open - RV.saboteur.poisonSeconds) <= 1, `10 s: ${open}`);
+  assert.ok(Math.abs(lock - (RV.saboteur.poisonSeconds + RV.saboteur.barrelLockSeconds)) <= 1, `+20 s: ${lock}`);
+
+  const s = game();
+  rv(s).poison = { source: 'tap', pours: RV.poison.pours };
+  assert.equal(waterPoisoned(s, 'tap'), true);
+  assert.equal(waterPoisoned(s, 'barrel'), false);
+  const { plant } = potWithPlant(s, 60);
+  plant.ph = 6.4;
+  waterPour(s, plant, 0.1, 'barrel');
+  assert.equal(plant.poisonedHours, 0, 'the barrel is clean');
+  assert.ok(Math.abs(plant.ph - 6.5) < 1e-9);
+  plant.ph = 6.0;
+  waterPour(s, plant, 0.1, 'tap');
+  assert.ok(Math.abs(plant.ph - 7.1) < 1e-9, 'tap pH +0.1 and +1.0 from the poison');
+  assert.equal(plant.poisonedHours, 6);
+  assert.ok(stressorsOf(plant).includes('poisoned'));
+  const h0 = plant.health;
+  stepPlants(s, 1);
+  assert.ok(h0 - plant.health >= CONFIG.plants.stressDamage.poisoned * 0.9, 'severe stress damage');
+  for (let i = 0; i < 6; i++) stepPlants(s, 1);
+  assert.equal(stressorsOf(plant).includes('poisoned'), false, 'wears off after 6 gh');
+  // only 8 pours
+  for (let i = 0; i < 7; i++) waterPour(s, plant, 0, 'tap');
+  assert.equal(rv(s).poison, null, 'the 8th poisoned pour used it up');
+  plant.ph = 6.4; plant.poisonedHours = 0;
+  waterPour(s, plant, 0, 'tap');
+  assert.equal(plant.poisonedHours, 0);
+});
+
+test('poison counters: a seen saboteur flees without poisoning; dump and refill clears the water', () => {
+  const s = game();
+  at(s, 10, 0);
+  const p = s.player;
+  const e = spawnSaboteur(s, 'poison', { source: 'tap' });
+  e.x = 42 * TS;
+  p.x = 42 * TS + 5 * TS; p.y = s.surface[42] * TS - p.h;   // standing 5 tiles away
+  run(s, () => !s.entities.includes(e) || e.gone, 60);
+  assert.equal(rv(s).poison, null, 'he ran before the 10 s');
+  rv(s).poison = { source: 'barrel', pours: 8 };
+  assert.equal(purgeWater(s), true);
+  assert.equal(rv(s).poison, null);
+  assert.equal(purgeWater(s), false);
+});
+
+test('a camera that records his saboteur is the leverage; a dog bite sends him running', () => {
+  const s = game();
+  at(s, 10, 0);
+  addObject(s, { kind: 'camera', x: 44, y: s.surface[44] - 2, dir: -1, footage: 0 });
+  assert.equal(rv(s).leverage, false);
+  const e = spawnSaboteur(s, 'poison', { source: 'tap' });
+  e.x = 40 * TS;
+  run(s, () => rv(s).leverage, 60);
+  assert.equal(rv(s).leverage, true);
+  const s2 = game();
+  at(s2, 10, 0);
+  giveDog(s2);
+  const e2 = spawnSaboteur(s2, 'poison', { source: 'tap' });
+  e2.x = 40 * TS;
+  s2.threats.dog.x = 40 * TS;
+  run(s2, () => e2.state === 'flee' || e2.gone || e2.state === 'ko', 30);
+  assert.ok(['flee', 'ko'].includes(e2.state) || e2.gone, 'the dog got him');
+  assert.equal(rv(s2).poison, null);
+});
+
+// ---- anonymous tip -----------------------------------------------------
+
+test('anonymous tip: +15 heat (+8 with the deputy bribed); footage of his saboteur blocks tips for good', () => {
+  const s = game();
+  night(s, 10, 100);
+  s.heat = 0;
+  forceRival(s, (d) => d.roll < 0.01 && POISON.tip(d));
+  assert.equal(rollAt23(s), 'tip');
+  assert.equal(s.heat, 15);
+  assert.equal(ents(s, 'saboteur').length, 0, 'no intruder');
+  const b = game();
+  night(b, 20, 100);
+  b.economy.buyers.skeet.known = true;
+  hs(b).lastBribeDay = 18;
+  b.heat = 0;
+  forceRival(b, (d) => d.roll < 0.01 && POISON.tip(d));
+  assert.equal(rollAt23(b), 'tip');
+  assert.equal(b.heat, 8, 'half the heat when the deputy is bribed');
+  const c = game();
+  night(c, 20, 100);
+  c.heat = 0;
+  rv(c).leverage = true;
+  forceRival(c, (d) => d.roll < 0.01 && POISON.tip(d));
+  assert.equal(rollAt23(c), null);
+  assert.equal(c.heat, 0, 'blocked');
+  assert.equal(tt(c).hostile[nightKeyOf(c)], undefined, 'a blocked tip does not use up the night');
+});
+const nightKeyOf = (s) => (s.time.hour >= CONFIG.clock.wakeHour ? s.time.day + 1 : s.time.day);
+
+// ---- pest jar ----------------------------------------------------------
+
+test('pest jar: the saboteur infests one plant in 4 s; 3 health/gh; spreads within 2 tiles every 12 gh', () => {
+  const s = game();
+  night(s, 10, 100);
+  const a = potWithPlant(s, 60, 0.3);
+  const near = potWithPlant(s, 62, 0.3);      // 2 tiles
+  const far = potWithPlant(s, 65, 0.3);       // 3 tiles from `near`, 5 from `a`
+  forceRival(s, (d) => d.roll < 0.01 && POISON.pest(d) && d.pick < 0.3);
+  assert.equal(rollAt23(s), 'pest');
+  const e = ents(s, 'saboteur')[0];
+  assert.equal(e.job, 'pest');
+  assert.equal(e.plantId, a.plant.id);
+  s.player.x = 150 * TS;
+  e.x = 59 * TS;
+  run(s, () => e.state === 'work', 30);
+  const secs = run(s, () => a.plant.infested, 30);
+  assert.ok(Math.abs(secs - RV.saboteur.pestSeconds) <= 1, `4 s: ${secs}`);
+  assert.equal(near.plant.infested, false);
+  assert.ok(stressorsOf(a.plant).includes('pest'));
+  const h0 = a.plant.health;
+  stepPlants(s, 1);
+  assert.ok(h0 - a.plant.health >= CONFIG.plants.stressDamage.pest * 0.9, 'about 3 health per gh');
+  for (let i = 0; i < 10; i++) stepPlants(s, 1);
+  assert.equal(near.plant.infested, false, 'not before 12 gh');
+  stepPlants(s, 1);
+  assert.equal(near.plant.infested, true, 'spread to the plant 2 tiles away');
+  assert.equal(far.plant.infested, false, 'spacing 3+ tiles stops it');
+});
+
+test('pest counters: pots 3+ tiles apart stop the spread; neem cures one plant', () => {
+  const s = game();
+  const a = potWithPlant(s, 60, 0.3);
+  const b = potWithPlant(s, 63, 0.3);         // 3 tiles
+  a.plant.infested = true;
+  for (let i = 0; i < 60; i++) { a.plant.health = 100; stepPlants(s, 1); }
+  assert.equal(b.plant.infested, false);
+  neemPlant(s, a.plant);
+  assert.equal(a.plant.infested, false);
+  assert.equal(stressorsOf(a.plant).includes('pest'), false);
+});
+
+// ---- goons -------------------------------------------------------------
+
+test('goon squads only appear at aggression 70+ (25% of rolls)', () => {
+  const s = game();
+  night(s, 10, 69);
+  forceRival(s, (d) => d.roll < 0.01 && d.goon < 0.2 && POISON.tip(d));
+  assert.equal(rollAt23(s), 'tip', 'under 70 a low goon draw is just sabotage');
+  assert.equal(ents(s, 'goon').length, 0);
+  const t = game();
+  night(t, 10, 70);
+  forceRival(t, (d) => d.roll < 0.2 && d.goon < 0.2);
+  assert.equal(rollAt23(t), 'goons');
+  const goons = ents(t, 'goon');
+  assert.equal(goons.length, 2);
+  assert.ok(goons.every((g) => g.hp === 80 && g.armed));
+  const u = game();
+  night(u, 10, 70);
+  forceRival(u, (d) => d.roll < 0.2 && d.goon >= 0.25 && POISON.tip(d));
+  assert.equal(rollAt23(u), 'tip', '75% of rolls are still sabotage');
+});
+
+test('goons smash pots (3 s each) and fight; beating the squad is -20; three squads make Dale back off 10 days', () => {
+  const s = game();
+  at(s, 10, 0);
+  rv(s).aggression = 90;
+  s.player.x = 150 * TS; s.player.y = s.surface[150] * TS - s.player.h;
+  const pots = [60, 63].map((x) => potWithPlant(s, x, 0.3));
+  const goons = spawnGoons(s);
+  goons.forEach((g, i) => { g.x = (58 - i) * TS; });
+  // time to the first smashed pot is at least the 3 s smash
+  const t = run(s, () => s.objects.filter((o) => o.kind === 'pot').length < 4 + 2, 120);
+  assert.ok(t >= RV.goon.smashSeconds, `smashing takes time (${t} s)`);
+  run(s, () => ents(s, 'goon').length === 0, 200);
+  assert.equal(s.plants.length, 0, 'both plants destroyed');
+  assert.equal(s.objects.filter((o) => o.kind === 'pot' && pots.some((p) => p.pot.id === o.id)).length, 0);
+
+  // the fight: knock a squad out
+  const s2 = game();
+  at(s2, 10, 0);
+  rv(s2).aggression = 90;
+  for (let n = 1; n <= RV.goon.backOffSquads; n++) {
+    const gs = spawnGoons(s2);
+    for (const g of gs) damageEntity(s2, g, 999, 'melee');
+    stepThreats(s2, 0.5);
+    stepThreats(s2, 0.5);
+    s2.entities = [];
+    assert.equal(rv(s2).aggression, 70, `squad ${n} beaten: -20`);
+    rv(s2).aggression = 90;
+  }
+  assert.ok(rv(s2).backOffUntil > nowGh(s2) + 9 * 24, 'three beaten squads: Dale backs off 10 days');
+  night(s2, 10, 100);
+  forceRival(s2, (d) => d.roll < 0.01);
+  assert.equal(rollAt23(s2), null);
+  at(s2, 25, 22.9);
+  forceRival(s2, (d) => d.roll < 0.01 && POISON.tip(d));
+  assert.equal(rollAt23(s2), 'tip', 'back after the 10 days');
+});
+
+test('goons shoot back: they hurt the player in range; a guard fights them', () => {
+  const s = game();
+  at(s, 10, 0);
+  const [g] = spawnGoons(s);
+  g.x = 60 * TS;
+  const p = s.player;
+  p.x = 64 * TS; p.y = s.surface[64] * TS - p.h; p.onGround = true;
+  const hp0 = p.hp;
+  for (let i = 0; i < 60; i++) { stepThreats(s, 0.5); if (p.hp < hp0) break; }
+  assert.ok(p.hp < hp0, 'the player was shot');
+
+  const s2 = game();
+  at(s2, 10, 0);
+  hire(s2, 1, 'guard');
+  placeMarker(s2, 0, 60); placeMarker(s2, 1, 62);
+  s2.player.x = 150 * TS;
+  const [g2] = spawnGoons(s2);
+  g2.x = 64 * TS; g2.state = 'smash'; g2.workLeft = 999;
+  for (let i = 0; i < 200 && g2.state !== 'dead' && g2.state !== 'ko'; i++) { stepCrew(s2, 0.5); stepThreats(s2, 0.5); }
+  assert.ok(g2.hp < 80, 'the guard hurt the goon');
+});

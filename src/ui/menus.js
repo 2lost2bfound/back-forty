@@ -10,7 +10,10 @@ import {
   shopStock, shopOpen, buyItem, orderOf, fillQuote, fillOrder, nowGh, payFee,
   buyerLevel, buyerMult, BUYER_KEYS, carriedGrams, carryCap,
 } from '../sim/economy.js';
-import { refuseFee } from '../sim/threats.js';
+import { refuseFee, payTribute, rv } from '../sim/threats.js';
+import {
+  boardCandidates, describe, hire, fire, giveBonus, bailOut, dockPay, threaten, toggleOutgoing, placeMarker, crewOf,
+} from '../sim/crew.js';
 
 function el(tag, cls, parent, text) {
   const e = document.createElement(tag);
@@ -79,6 +82,7 @@ export function initMenus(hud) {
     if (!shopOpen(state.time, shopKey)) {
       el('div', 'menu-note', shopPanel.body, `Closed. Open ${hrs(sh.open)}-${hrs(sh.close)}.`);
     }
+    if (shopKey === 'bar') renderBoard(state);
     for (const item of shopStock(shopKey, state)) {
       const row = el('div', 'menu-row', shopPanel.body);
       el('span', 'menu-item-name', row, item.name + (item.unreg ? ' (unregistered)' : ''));
@@ -91,6 +95,20 @@ export function initMenus(hud) {
         renderShop();
         shopPanel.title.textContent = `${sh.label} — $${Math.round(state.player.cash)}`;
       };
+    }
+  }
+
+  /** The bar's hiring board (plan A8): two candidates, one adjective per stat. */
+  function renderBoard(state) {
+    el('div', 'menu-note', shopPanel.body, `Hiring board (crew ${crewOf(state).members.length}/${CONFIG.crew.max})`);
+    for (const c of boardCandidates(state)) {
+      const d = describe(state, c);
+      const row = el('div', 'menu-row', shopPanel.body);
+      el('span', 'menu-item-name', row, `${c.name}: ${d.rel}, ${d.disc}, ${d.greed}, ${d.nerve}`);
+      for (const role of Object.keys(CONFIG.crew.wage)) {
+        const b = el('button', 'menu-btn', row, `${role} $${CONFIG.crew.wage[role]}/day`);
+        b.onclick = () => { hud.toast(hire(state, c.id, role).msg); renderShop(); };
+      }
     }
   }
 
@@ -141,7 +159,7 @@ export function initMenus(hud) {
     const eco = state.economy;
     phonePanel.body.textContent = '';
     const tabs = el('div', 'menu-row', phonePanel.body);
-    for (const t of ['orders', 'contacts', 'ledger', 'heat']) {
+    for (const t of ['orders', 'contacts', 'ledger', 'heat', 'crew']) {
       const b = el('button', 'menu-btn', tabs, t === phoneTab ? `[${t}]` : t);
       b.onclick = () => { phoneTab = t; renderPhone(); };
     }
@@ -181,6 +199,8 @@ export function initMenus(hud) {
         const b = el('button', 'menu-btn', phonePanel.body, 'Pay debt');
         b.onclick = () => { hud.toast(`Paid $${Math.round(payDebt(state))} of your debt.`); renderPhone(); };
       }
+    } else if (phoneTab === 'crew') {
+      renderCrewTab(state);
     } else if (phoneTab === 'contacts') {
       for (const key of BUYER_KEYS) {
         const b = eco.buyers[key];
@@ -194,9 +214,42 @@ export function initMenus(hud) {
       if (eco.ledger.length === 0) el('div', 'menu-note', phonePanel.body, 'Nothing yet.');
       for (const e of eco.ledger.slice().reverse()) {
         el('div', 'menu-row', phonePanel.body,
-          `Day ${e.day} ${e.hour}:00  ${e.text}${e.amount ? `  ${e.amount > 0 ? '+' : '-'}$${Math.abs(Math.round(e.amount))}` : ''}`);
+          `Day ${e.day} ${e.hour}:00  ${e.text}${e.amount ? `  ${e.amount > 0 ? '+' : '-'}$${Math.abs(Math.round(e.amount))}` : ''}` +
+          // Skimming shows only once you have sold to that buyer yourself (plan A8).
+          `${e.expected !== undefined && eco.buyers[e.buyer].personal ? ` (expected $${Math.round(e.expected)})` : ''}`);
       }
     }
+  }
+
+  function renderCrewTab(state) {
+    const body = phonePanel.body;
+    const c = crewOf(state);
+    const act = (label, row, fn) => {
+      el('button', 'menu-btn', row, label).onclick = () => { hud.toast(fn().msg || ''); renderPhone(); };
+    };
+    if (c.members.length === 0) el('div', 'menu-note', body, 'No crew. Check the hiring board at the bar.');
+    for (const m of c.members) {
+      const d = describe(state, m);
+      const row = el('div', 'menu-row', body,
+        `${m.name} (${m.role}, ${m.status}) loyalty ${m.loyalty}` +
+        (d.known ? ` · Rel ${d.rel} Disc ${d.disc} Greed ${d.greed} Nerve ${d.nerve}` : ` · ${d.rel}, ${d.disc}, ${d.greed}, ${d.nerve}`));
+      act('Bonus $100', row, () => giveBonus(state, m.id));
+      if (m.status === 'jailed' && !m.bailed) act('Bail $800', row, () => bailOut(state, m.id));
+      act('Dock pay', row, () => dockPay(state, m.id));
+      act('Threaten', row, () => threaten(state, m.id));
+      act('Fire', row, () => fire(state, m.id));
+    }
+    for (const o of state.objects.filter((x) => x.kind === 'rack')) {
+      const row = el('div', 'menu-row', body, `Rack at x${o.x}: ${o.outgoing ? 'OUTGOING (runners take from it)' : 'normal'}`);
+      act('Toggle outgoing', row, () => ({ msg: toggleOutgoing(state, o.id) ? 'Marked outgoing.' : 'Unmarked.' }));
+    }
+    const mk = el('div', 'menu-row', body, `Guard patrol markers: x${c.markers[0]} and x${c.markers[1]}`);
+    const here = () => (state.player.x + state.player.w / 2) / CONFIG.world.tile;
+    act('Marker A here', mk, () => { placeMarker(state, 0, here()); return { msg: 'Marker A set.' }; });
+    act('Marker B here', mk, () => { placeMarker(state, 1, here()); return { msg: 'Marker B set.' }; });
+    const dale = rv(state).aggression;
+    const row = el('div', 'menu-row', body, `Dale: ${dale >= 70 ? 'furious' : dale >= 40 ? 'angry' : 'restless'}`);
+    act(`Pay tribute $${CONFIG.threats.rival.tribute.cost}`, row, () => payTribute(state));
   }
 
   // ----------------------------------------------- notices, game over -----

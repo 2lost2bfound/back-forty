@@ -31,7 +31,8 @@ export function entityBox(e) {
 const inBox = (b, x, y) => x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h;
 
 const threats = (s) => s.threats;
-export const isHostile = (e) => (e.kind === 'thief' || e.kind === 'goon') && e.state !== 'ko' && e.state !== 'dead';
+export const HOSTILE_KINDS = ['thief', 'goon', 'saboteur'];
+export const isHostile = (e) => HOSTILE_KINDS.includes(e.kind) && e.state !== 'ko' && e.state !== 'dead';
 
 // ------------------------------------------------------------- weapons ---
 
@@ -267,7 +268,7 @@ function bulletHit(state, b) {
   }
   return false;
 }
-const isHostileKind = (e) => e.kind === 'thief' || e.kind === 'goon';
+const isHostileKind = (e) => HOSTILE_KINDS.includes(e.kind);
 
 /** A shot landing within 2 tiles of a thief may scare it off (50%). */
 function landed(state, b) {

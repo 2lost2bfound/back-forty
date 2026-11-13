@@ -7,6 +7,7 @@ import { stepPlants } from './plants.js';
 import { stepHeat, hs } from './heat.js';
 import { stepEconomy } from './economy.js';
 import { stepSpawn } from '../entities/spawn.js';
+import { stepCrew } from './crew.js';
 import { stepThreats } from './threats.js';
 import { recoverPlayer } from '../entities/combat.js';
 
@@ -22,6 +23,7 @@ export function stepSim(s, dtReal) {
   stepHeat(s, gh);
   stepEconomy(s, gh);
   stepSpawn(s);
+  stepCrew(s, dtReal);
   stepThreats(s, dtReal);
   const h = hs(s);
   if (s.threats.downed) { s.threats.downed = false; skipDays(s, 0); } // woke at the clinic
@@ -35,8 +37,8 @@ export function stepSim(s, dtReal) {
 
 /**
  * Lose `days` days (bail 1, jail 4): run the sim to the next 06:00, plus that
- * many whole days. Plants only survive with a drip kit (owned or
- * placed); gardener and ally care arrive with M6/M9.
+ * many whole days. Plants survive with a drip kit (owned or placed) or a
+ * gardener on the crew (his tending runs inside stepSim); ally care is M9.
  */
 export function skipDays(state, days) {
   const h = hs(state);
