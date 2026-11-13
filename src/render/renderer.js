@@ -354,27 +354,9 @@ export function createRenderer(canvas) {
       drawDig(state);
       drawHover(state);
       lighting.draw(ctx, state, cam);
-      if (isRaining(state)) drawRain(ctx, dt || 1 / 60);
+      if (state.stressOn) drawRain(ctx, dt || 1 / 60, CONFIG.stress.particles); // F4: rain at night
+      else if (isRaining(state)) drawRain(ctx, dt || 1 / 60);
       drawAltOverlay(state);
-    },
-
-    /**
-     * F4 stress rectangles. Rects live in a Float32Array [x, y, vx, vy] per
-     * rectangle; color fixed per index bucket so fillStyle changes at most
-     * `colors.length` times per frame and the frame loop allocates nothing.
-     */
-    drawStressRects(rects, count) {
-      const stress = CONFIG.stress;
-      const size = stress.rectSize;
-      const colors = stress.colors;
-      const nColors = colors.length;
-      for (let c = 0; c < nColors; c++) {
-        ctx.fillStyle = colors[c];
-        for (let i = c; i < count; i += nColors) {
-          const j = i * 4;
-          ctx.fillRect(rects[j] | 0, rects[j + 1] | 0, size, size);
-        }
-      }
     },
   };
 }

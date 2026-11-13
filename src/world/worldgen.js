@@ -28,9 +28,9 @@ function buildingTemplate(w, h, wallId) {
   rows.push(String.fromCharCode(wallId).repeat(w));
   for (let i = 1; i < h; i++) {
     const isDoorRow = i >= h - 2;
-    const right = isDoorRow ? T.AIR : wallId;
+    const right = isDoorRow ? T.AIR : wallId; // doors in both side walls: the road runs through
     rows.push(
-      String.fromCharCode(wallId) +
+      String.fromCharCode(right) +
       String.fromCharCode(T.BGWALL).repeat(w - 2) +
       String.fromCharCode(right)
     );
@@ -48,8 +48,8 @@ function shackTemplate() {
   return [
     W.repeat(SHACK_W),
     ...Array.from({ length: SHACK_H - 3 }, () => W + bg.repeat(SHACK_W - 2) + W),
-    W + bg.repeat(SHACK_W - 2) + A, // door, upper
-    W + bg.repeat(SHACK_W - 2) + A, // door, lower
+    A + bg.repeat(SHACK_W - 2) + A, // doors both sides (yard on the left), upper
+    A + bg.repeat(SHACK_W - 2) + A, // lower
   ];
 }
 

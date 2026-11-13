@@ -185,7 +185,7 @@ export function initMenus(hud) {
     const state = stateRef;
     const eco = state.economy;
     phonePanel.body.textContent = '';
-    const tabs = el('div', 'menu-row', phonePanel.body);
+    const tabs = el('div', 'menu-row phone-tabs', phonePanel.body);
     for (const t of ['orders', 'contacts', 'ledger', 'heat', 'crew', 'allies', 'journal', 'status']) {
       const b = el('button', 'menu-btn', tabs, t === phoneTab ? `[${t}]` : t);
       b.onclick = () => { phoneTab = t; renderPhone(); };

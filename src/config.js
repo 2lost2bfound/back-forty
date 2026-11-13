@@ -10,6 +10,7 @@ export const CONFIG = {
     // Default seed for the PRNG in dev builds (tests and the balance bot
     // create their own seeds; the save carries the run's rngState).
     seed: 1337,
+    exposeGlobals: true,   // window.__perf / window.__dev for the browser harness
   },
 
   canvas: {
@@ -43,22 +44,29 @@ export const CONFIG = {
     frameBudgetMs: 16.6,
     jsBudgetAvgMs: 6,      // JS time per frame, average
     jsBudgetWorstMs: 10,   // JS time per frame, worst
-    gateAvgMs: 12,         // F4 stress-gate limit (plan §B2)
+    gateAvgMs: 12,         // F4 stress-gate limit (plan §B2), on per-frame WORK time
     gateWorstMs: 20,
+    overMs: 20,            // a frame whose work exceeds this counts in `over20`
+    dropFactor: 1.5,       // dropped frame: interval > this x the display interval
     overlayHz: 4,          // perf overlay update rate (DOM, dirty-checked)
-    frameHistory: 120,     // samples for avg/max frame ms
+    frameHistory: 120,     // rolling-window samples for avg/max (work and interval)
   },
 
-  // F4 stress scene (plan §B2 perf gate; dev builds only).
+  // F4 stress scene (plan §B2 perf gate; dev only): the real systems at the
+  // plan's load, spawned near the camera. Time is pinned to `hour` (night, long
+  // lamp timers lit) and the rain draws regardless of the weather roll.
   stress: {
-    rectangles: 2000,      // moving test rectangles that must hold 60 fps
-    speedMin: 40,          // px/s, random per rectangle
-    speedMax: 140,
-    colors: [
-      '#e6194b', '#3cb44b', '#ffe119', '#4363d8',
-      '#f58231', '#911eb4', '#46f0f0', '#f032e6',
-    ],
-    rectSize: 6,           // px, square
+    entities: 40,          // inert 'stress' entities walking back and forth
+    plants: 60,            // total plants alive (existing ones count)
+    particles: 150,        // rain streaks (the pool's full 150)
+    lights: 12,            // lamps lit inside the view
+    hour: 22.5,            // pinned clock: full night, 18 h lamps on
+    lampType: 'lamp_cfl',
+    lampHours: 18,
+    strain: 'ditch',
+    spanTiles: 50,         // pots/lamps/entities spawn across this many tiles from the camera
+    speedMin: 20,          // px/s entity walk speed
+    speedMax: 60,
   },
 
   // World layout (plan §B5, §A3). One authored world, no procedural generation.
@@ -771,6 +779,9 @@ export const CONFIG = {
     footstepPx: 22,        // one footstep per this much walking
     falloffPx: 500,        // SFX fade out (and pan) with distance from the camera centre
     storageKey: 'backforty.audio',
+    // Config wave names -> OscillatorNode.type (the music beds use real oscillators;
+    // the SFX path renders its own buffers and takes the config names directly).
+    oscTypes: { sine: 'sine', square: 'square', saw: 'sawtooth', tri: 'triangle' },
     sfx: {
       footstep:  { wave: 'tri',    f0: 90,   f1: 50,   len: 0.08, attack: 0.002, noise: 0.5,  vol: 0.25 },
       jump:      { wave: 'sine',   f0: 200,  f1: 420,  len: 0.14, attack: 0.005, noise: 0,    vol: 0.3 },
@@ -827,7 +838,7 @@ export const CONFIG = {
   },
   // Automatic quality step-down (My Addition 12): average frame time over the
   // window above the limit steps down one level (particles, soft lights, peds).
-  quality: { avgMs: 18, windowS: 2, particleScale: 0.5, pedCap: 4, maxLevel: 3 },
+  quality: { avgMs: 18, workAvgMs: 12, windowS: 2, particleScale: 0.5, pedCap: 4, maxLevel: 3 },
   // First-time tips: shown once each, the first time the situation arises.
   tips: {
     start: 'Water and feed your plants, harvest when ripe, sell to Skeet in the park. Tab opens your phone.',

@@ -150,10 +150,11 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 0 3px;
-  font-size: 9px;
-  line-height: 1.15;
+  padding: 0 2px;
+  font-size: 8px;                /* 'Nutrients' fits the 48px slot */
+  line-height: 1.1;
   text-align: center;
+  overflow-wrap: anywhere;       /* long names wrap, never spill */
   color: #d7e3f4;
   overflow: hidden;
 }
@@ -169,7 +170,7 @@ body {
 .hud-prompt {
   position: absolute;
   left: 50%;
-  bottom: 96px;
+  bottom: 150px;                 /* above the stamina/HP/heat bars (they top out near 138px) */
   transform: translateX(-50%);
   padding: 3px 10px;
   font-size: 13px;
@@ -229,6 +230,16 @@ body {
   border: 1px solid #2a3550;
 }
 
+/* Phone: wide panel, wrapping tab row, never scrolls sideways (8 tabs at 1600x900). */
+.menu-panel.phone .menu-body {
+  width: 960px;
+  overflow-x: hidden;
+  overflow-wrap: anywhere;
+}
+
+.menu-panel.phone .menu-row { flex-wrap: wrap; }
+.phone-tabs { gap: 6px; }
+
 .menu-hint {
   font-size: 11px;
   color: #7d8db0;
@@ -287,6 +298,8 @@ body {
 /* Hover plant panel (My Addition 6 companion): read-only, never grabs clicks */
 .plant-panel {
   position: absolute;
+  top: 200px;                    /* below the F3 overlay (top-left) and the order list */
+  left: 8px;
   display: none;
   min-width: 190px;
   padding: 7px 10px;

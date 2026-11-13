@@ -3,17 +3,18 @@
 // (1 tick = 1/60 game hour), sleep runs the sim at 20x and stops physics.
 // stepSim (src/sim/sim.js) runs time -> plants -> heat -> economy (crew/threats/...
 // join as they are built). The frame loop allocates nothing: input is a
-// reused object, the stress pool is a preallocated Float32Array, DOM updates
+// reused object, the perf stats are preallocated typed arrays, DOM updates
 // happen at CONFIG.ui.updateHz with dirty checks.
 
 import { CONFIG } from './config.js';
-import { createRng } from './rng.js';
 import { initInput } from './ui/input.js';
 import { createRenderer } from './render/renderer.js';
 import { initHud } from './ui/hud.js';
 import { initMenus } from './ui/menus.js';
 import { initScreens } from './ui/screens.js';
 import { feedFrame } from './quality.js';
+import { createPerf } from './perf.js';
+import { startStress, stepStress, stopStress } from './dev/stress.js';
 import { enterLegacy } from './sim/license.js';
 import { heatTier } from './sim/heat.js';
 import {
@@ -52,6 +53,7 @@ function tip(key) {
 
 /** Swap in a new or loaded run. */
 function adopt(next, msg) {
+  stopStress(state); // the F4 scene belongs to the old run
   state = next;
   state.paused = false;
   screens.closeAll();
@@ -131,27 +133,7 @@ function stepPhysics(s, dt) {
   stepPlayer(s, inp, dt);
   stepCombat(s, dt);
   stepNpcs(s, dt);
-  if (s.stressOn) updateStress(dt);
-}
-
-/** Stress-scene rectangles bounce inside the canvas (F4 perf gate). */
-function updateStress(dt) {
-  const rects = stressRects;
-  const count = stress.rectangles;
-  const w = CONFIG.canvas.width;
-  const h = CONFIG.canvas.height;
-  const size = stress.rectSize;
-  for (let i = 0; i < count; i++) {
-    const j = i * 4;
-    let x = rects[j] + rects[j + 2] * dt;
-    let y = rects[j + 1] + rects[j + 3] * dt;
-    if (x < 0) { x = 0; rects[j + 2] = -rects[j + 2]; }
-    else if (x > w - size) { x = w - size; rects[j + 2] = -rects[j + 2]; }
-    if (y < 0) { y = 0; rects[j + 3] = -rects[j + 3]; }
-    else if (y > h - size) { y = h - size; rects[j + 3] = -rects[j + 3]; }
-    rects[j] = x;
-    rects[j + 1] = y;
-  }
+  if (s.stressOn) stepStress(s, dt);
 }
 
 // ------------------------------------------------------------- events ----
@@ -313,14 +295,13 @@ let hoverInfo = null;
 let lastUi = performance.now();
 
 function frame(now) {
+  const t0 = performance.now(); // work timer: update + draw (not the idle wait for vsync)
   const rawMs = now - last; // real frame delta, before the hidden-tab clamp
   const dt = Math.min(rawMs / 1000, CONFIG.loop.maxFrameDt);
   last = now;
   lastDt = dt;
 
   state.paused = menus.anyOpen() || screens.anyOpen();
-  const stepped = feedFrame(Math.min(rawMs, 100)); // automatic quality step-down (My Addition 12)
-  if (stepped) hud.toast('Reduced effects to keep the game smooth.');
   readInput();
 
   if (state.paused) {
@@ -361,9 +342,7 @@ function frame(now) {
     state.overlayOn = !state.overlayOn;
     perfEl.style.display = state.overlayOn ? 'block' : 'none';
   }
-  if (input.wasPressed('F4')) {
-    state.stressOn = !state.stressOn;
-  }
+  if (input.wasPressed('F4')) toggleStress();
   const screenBusy = screens.anyOpen();
   if (input.wasPressed('Escape') || input.wasPressed('KeyE')) {
     if (menus.isOpen('gameover') || screens.isOpen('title') || screens.isOpen('win') || screens.isOpen('settings')) { /* only their buttons leave */ }
@@ -391,7 +370,12 @@ function frame(now) {
   }
 
   input.endFrame();
-  updateOverlay(now, rawMs);
+  // Work time = JS update + draw + HUD; interval = rAF delta. Both feed the F3
+  // overlay and window.__perf; the quality step-down keys off both (quality.js).
+  const work = performance.now() - t0;
+  perf.record(work, rawMs);
+  if (feedFrame(Math.min(rawMs, 100), work)) hud.toast('Reduced effects to keep the game smooth.');
+  updateOverlay(now);
 
   requestAnimationFrame(frame);
 }
@@ -404,9 +388,13 @@ function updateHover() {
 
 function render() {
   renderer.draw(state, state.paused ? 0 : lastDt);
-  if (state.stressOn) {
-    renderer.drawStressRects(stressRects, stress.rectangles);
-  }
+}
+
+/** F4: spawn / remove the plan B2 stress scene, restarting the perf stats. */
+function toggleStress() {
+  if (state.stressOn) stopStress(state);
+  else startStress(state, renderer.cam.rx);
+  perf.reset();
 }
 
 // ------------------------------------------------- save/load UI hooks ----
@@ -444,55 +432,35 @@ window.addEventListener('backforty:legacy', () => {
   if (enterLegacy(state)) hud.toast('Legacy mode: growing and selling no longer raise heat. Thieves and Dale remain.');
 });
 
-// Preallocated stress-rectangle pool: [x, y, vx, vy] per rectangle.
-const stress = CONFIG.stress;
-const stressRects = new Float32Array(stress.rectangles * 4);
-const stressRng = createRng(CONFIG.dev.seed ^ 0x9e3779b9);
-for (let i = 0; i < stress.rectangles; i++) {
-  const j = i * 4;
-  stressRects[j] = stressRng.range(0, CONFIG.canvas.width);
-  stressRects[j + 1] = stressRng.range(0, CONFIG.canvas.height);
-  stressRects[j + 2] = stressRng.range(stress.speedMin, stress.speedMax) *
-    (stressRng.chance(0.5) ? 1 : -1);
-  stressRects[j + 3] = stressRng.range(stress.speedMin, stress.speedMax) *
-    (stressRng.chance(0.5) ? 1 : -1);
-}
-
 // ------------------------------------------------------ perf overlay ----
 // F3 shows fps and frame ms plus entity/particle counts (plan §A2).
 // DOM, updated at overlayHz with dirty checks — never per frame.
 
-const hist = new Float32Array(CONFIG.perf.frameHistory);
-let histLen = 0;
-let histAt = 0;
+const perf = createPerf();
+if (CONFIG.dev.exposeGlobals) {
+  window.__perf = perf;                              // rolling + since-reset stats, perf.reset()
+  window.__dev = { stress: toggleStress, state: () => state };
+}
 let lastOverlay = performance.now();
 let framesSince = 0;
 let lastText = '';
 
-function updateOverlay(now, rawMs) {
-  hist[histAt] = rawMs; // frame duration in ms
-  histAt = (histAt + 1) % hist.length;
-  if (histLen < hist.length) histLen++;
+function updateOverlay(now) {
   framesSince++;
-
   const interval = 1000 / CONFIG.perf.overlayHz;
   if (now - lastOverlay < interval) return;
   const span = now - lastOverlay;
   lastOverlay = now;
 
-  let avg = 0;
-  let worst = 0;
-  for (let i = 0; i < histLen; i++) {
-    avg += hist[i];
-    if (hist[i] > worst) worst = hist[i];
-  }
-  avg = histLen ? avg / histLen : 0;
   const fps = Math.round((framesSince * 1000) / span);
   const p = state.player;
-  const ents = 1 + (state.stressOn ? stress.rectangles : 0);
+  const ents = 1 + (state.entities ? state.entities.length : 0);
   const text =
-    `fps ${fps}  frame ${avg.toFixed(1)}ms avg / ${worst.toFixed(1)}ms max\n` +
-    `ents ${ents}  plants ${state.plants.length}  parts 0  dirty ${state.dirtyChunks.size}` +
+    `fps ${fps}  WORK ${perf.workAvg.toFixed(1)}ms avg / ${perf.workMax.toFixed(1)}ms max` +
+    `  (run ${perf.runWorkAvg.toFixed(1)} / ${perf.runWorkMax.toFixed(1)})\n` +
+    `over ${CONFIG.perf.overMs}ms: ${perf.over20}  dropped: ${perf.dropped}  n ${perf.samples} (${perf.seconds.toFixed(0)}s)` +
+    `  interval ${perf.intervalAvg.toFixed(1)} / ${perf.intervalMax.toFixed(1)}ms (display ${perf.displayMs.toFixed(1)})\n` +
+    `ents ${ents}  plants ${state.plants.length}  dirty ${state.dirtyChunks.size}` +
     `${state.stressOn ? '  STRESS (F4)' : ''}${state.sleeping ? '  SLEEP x' + CONFIG.sleep.speed : ''}\n` +
     `day ${state.time.day} ${state.time.hour.toFixed(2)}gh  cash $${Math.round(p.cash)}  pos ${(p.x | 0)},${(p.y | 0)}`;
   framesSince = 0;

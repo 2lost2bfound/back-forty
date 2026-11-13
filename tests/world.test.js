@@ -16,6 +16,7 @@ import {
 } from '../src/world/physics.js';
 import { newGame } from '../src/state.js';
 import { createPlayer, stepPlayer } from '../src/entities/player.js';
+import { buyItem } from '../src/sim/economy.js';
 
 const TS = CONFIG.world.tile;
 const COLS = CONFIG.world.cols;
@@ -113,7 +114,7 @@ test('shack and town buildings are stamped and walkable-in', () => {
   assert.ok(!isSolid(tileAt(grid, insideX, igy - 1)));
   // town building walls use town-solid
   const hw = CONFIG.world.buildings[2]; // hardware at 236
-  assert.equal(tileAt(grid, hw.x, groundRow(grid, hw.x) - 1), T.TOWN);
+  assert.equal(tileAt(grid, hw.x, groundRow(grid, hw.x) - 3), T.TOWN); // above the door gap
 });
 
 function surfaceRowOf(grid, x) {
@@ -529,4 +530,82 @@ test('newGame is deterministic and well-formed', () => {
   const spawnTile = CONFIG.world.spawnTileX;
   assert.ok(Math.abs(p.x - (spawnTile * TS + (TS - CONFIG.player.w) / 2)) < 1);
   assert.equal(Math.round(p.y + p.h), a.surface[spawnTile] * TS);
+});
+
+// ------------------------------------------------ reachability / physics ----
+
+/** Hold one direction (no jump, no dig) until the player reaches targetX px. */
+function walkTo(state, targetX, dir, maxFrames = 6000) {
+  const inp = emptyInput();
+  inp[dir > 0 ? 'right' : 'left'] = true;
+  const p = state.player;
+  for (let i = 0; i < maxFrames; i++) {
+    stepPlayer(state, inp, 1 / 60);
+    if (dir > 0 ? p.x >= targetX : p.x <= targetX) return true;
+  }
+  return false;
+}
+const doorPx = (key) => { const b = CONFIG.world.buildings.find((x) => x.key === key); return (b.x + b.w - 1) * TS; };
+
+test('the player walks spawn -> yard pots and back holding only left/right', () => {
+  const state = freshState();
+  const spawnX = state.player.x;
+  const yardPx = 47 * TS; // east-most pot
+  assert.ok(walkTo(state, yardPx, -1), `stuck at x=${state.player.x}`);
+  assert.ok(walkTo(state, spawnX, 1), `could not return, x=${state.player.x}`);
+});
+
+test('the road is walkable from spawn to the town hall door (no jump, no dig)', () => {
+  const state = freshState();
+  assert.ok(walkTo(state, doorPx('townhall'), 1), `stuck at x=${state.player.x}`);
+  assert.ok(walkTo(state, 0.5 * CONFIG.world.spawnTileX * TS, -1, 9000), `no way back, x=${state.player.x}`);
+});
+
+test('every building has a walkable door gap in both side walls', () => {
+  const { grid } = generateWorld(1337);
+  for (const b of CONFIG.world.buildings) {
+    const gy = groundRow(grid, b.x + 1);
+    for (const x of [b.x, b.x + b.w - 1]) {
+      assert.equal(tileAt(grid, x, gy - 1), T.AIR, `${b.key} x=${x} lower`);
+      assert.equal(tileAt(grid, x, gy - 2), T.AIR, `${b.key} x=${x} upper`);
+    }
+  }
+});
+
+test('shop purchase works at the hardware store door during open hours', () => {
+  const state = freshState();
+  state.time.hour = 10;
+  assert.ok(walkTo(state, doorPx('hardware'), 1), 'reached the door');
+  const cash = state.player.cash;
+  stepPlayer(state, emptyInput(), 1 / 60);
+  const inp = emptyInput();
+  inp.interactPressed = true;
+  stepPlayer(state, inp, 1 / 60);
+  assert.ok(state.events.some((e) => e.type === 'openShop' && e.shop === 'hardware'), 'E opens the shop');
+  const r = buyItem(state, 'pot', 'hardware');
+  assert.ok(r.ok, r.msg);
+  assert.ok(state.player.cash < cash);
+});
+
+test('jumping into a wall slides down: gravity applies while pressing in', () => {
+  for (const dir of [1, -1]) {
+    const state = freshState();
+    const grid = state.tiles;
+    const gx = 300, gy = surfaceRowOf(grid, gx);
+    for (let y = gy - 12; y < gy; y++) grid[y * COLS + gx + 3] = T.STONE; // tall wall
+    for (let y = gy - 12; y < gy; y++) grid[y * COLS + gx - 3] = T.STONE;
+    const p = placeAt(state, gx * TS + 2, gy * TS - state.player.h);
+    p.x = dir > 0 ? (gx + 3) * TS - p.w - 0.5 : (gx - 2) * TS + 0.5;
+    const inp = emptyInput();
+    inp[dir > 0 ? 'right' : 'left'] = true;
+    let maxY = Infinity, airFrames = 0, landed = false;
+    for (let i = 0; i < 200; i++) {
+      inp.jumpPressed = i === 5;
+      stepPlayer(state, inp, 1 / 60);
+      if (i > 5 && !p.onGround) { airFrames++; maxY = Math.min(maxY, p.y); }
+      if (i > 10 && p.onGround) { landed = true; break; }
+    }
+    assert.ok(landed, `dir ${dir}: landed (air frames ${airFrames})`);
+    assert.ok(airFrames < 50, `dir ${dir}: no mid-air hang (${airFrames})`);
+  }
 });

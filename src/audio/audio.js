@@ -134,7 +134,7 @@ function note(bed, freq, when, dur, out) {
   f.connect(env); env.connect(out);
   for (const c of [-M.detuneCents, M.detuneCents]) {
     const o = rt.ctx.createOscillator();
-    o.type = M.wave; o.frequency.value = freq; o.detune.value = c;
+    o.type = A.oscTypes[M.wave]; o.frequency.value = freq; o.detune.value = c;
     o.connect(f); o.start(when); o.stop(when + dur + 0.05);
   }
 }

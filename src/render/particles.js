@@ -7,18 +7,20 @@ import { quality } from '../quality.js';
 
 const W = CONFIG.canvas.width;
 const H = CONFIG.canvas.height;
-const N = Math.min(CONFIG.weather.rainParticles, CONFIG.limits.particles);
+const MAX = CONFIG.limits.particles;
+const N = Math.min(CONFIG.weather.rainParticles, MAX);
 const SPEED = 320;   // px/s fall
 const DRIFT = -60;   // px/s sideways
 const LEN = 6;
 
-const xs = new Float32Array(N);
-const ys = new Float32Array(N);
-for (let i = 0; i < N; i++) { xs[i] = (i * 97) % W; ys[i] = (i * 53) % H; }
+const xs = new Float32Array(MAX);
+const ys = new Float32Array(MAX);
+for (let i = 0; i < MAX; i++) { xs[i] = (i * 97) % W; ys[i] = (i * 53) % H; }
 
-export function drawRain(ctx, dt) {
+/** `count` overrides the streak count (the F4 stress scene runs the full pool). */
+export function drawRain(ctx, dt, count = N) {
   ctx.fillStyle = 'rgba(170,200,235,0.6)';
-  const n = (N * quality.particleScale) | 0; // step-down halves the cap
+  const n = (Math.min(count, MAX) * quality.particleScale) | 0; // step-down halves the cap
   for (let i = 0; i < n; i++) {
     let y = ys[i] + SPEED * dt;
     let x = xs[i] + DRIFT * dt;

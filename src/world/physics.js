@@ -85,7 +85,7 @@ function moveX(grid, b, dt, opts) {
     return;
   }
   // Automatic step-up over a 1-tile ledge while grounded.
-  if (opts.stepUp && (b.onGround || Math.abs(b.vy) < 1)) {
+  if (opts.stepUp && b.onGround) { // never while airborne: a jump into a wall must slide down
     const upY = b.y - TS;
     if (!boxHitsSolid(grid, b.x, upY, b.w, b.h) && !boxHitsSolid(grid, nx, upY, b.w, b.h)) {
       b.y = upY;

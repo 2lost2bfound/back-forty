@@ -97,8 +97,7 @@ export function initHud() {
       const bankStr = state.player.bank > 0 ? `  Bank $${Math.round(state.player.bank)}` : '';
       const cashStr = `$${Math.round(state.player.cash)}${bankStr}${state.legacy ? '  LEGACY' : ''}${state.sleeping ? '  (sleeping)' : ''}`;
       if (cashStr !== cashEl.textContent) cashEl.textContent = cashStr;
-      const wStr = weather === 'Clear' ? '' : weather;
-      if (wStr !== weatherEl.textContent) weatherEl.textContent = wStr;
+      if (weather !== weatherEl.textContent) weatherEl.textContent = weather; // 'Clear' too: never an empty box
 
       const stamPct = Math.round(state.player.stamina);
       if (stamPct !== stamFill.dataset.v) {
