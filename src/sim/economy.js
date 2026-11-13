@@ -16,6 +16,7 @@ import { seedBagOf } from './plants.js';
 import { strainUnlocked } from './mastery.js';
 import { canBuyDog, giveDog, dogHurt, healDog } from '../entities/dog.js';
 import { buyTruce } from './threats.js';
+import { dealerPrice, buyerPenalty, canTaper, startTaper, detox, useSubstance } from './addiction.js';
 import {
   addHeat, heatTier, noteSale, noteSpend, bribeDeputy, bribePrice, hireLawyer, rumorText,
 } from './heat.js';
@@ -46,7 +47,8 @@ export function shopStock(shopKey, state) {
     const base = key === 'bribe' && state ? bribePrice(state) : E.prices[key];
     return {
       key, name: CONFIG.itemNames[key], unreg,
-      price: unreg ? Math.round(base * (1 + E.alleyGunMarkup)) : base,
+      price: unreg ? Math.round(base * (1 + E.alleyGunMarkup))
+        : state && shopKey === 'alley' && (key === 'crank' || key === 'blues') ? dealerPrice(state, key) : base,
       service: E.services.includes(key),
     };
   });
@@ -95,6 +97,7 @@ export function buyItem(state, key, shopKey = 'hardware') {
   if (key === 'bribe') return bribeDeputy(state);
   if (key === 'truce') return buyTruce(state);
   if (key === 'dog' && !canBuyDog(state)) return { ok: false, msg: 'You already have a dog.' };
+  if (key === 'taper' && !canTaper(state)) return { ok: false, msg: 'You already have a taper kit for today.' };
   if (key === 'vet' && !dogHurt(state)) return { ok: false, msg: 'Your dog is fine.' };
   if (p.cash < entry.price) return { ok: false, msg: 'Not enough cash.' };
   if (key === 'ask_around') return askAround(state);
@@ -110,6 +113,8 @@ export function buyItem(state, key, shopKey = 'hardware') {
     if (key === 'lawyer') hireLawyer(state);
     if (key === 'dog') giveDog(state);
     if (key === 'vet') healDog(state);
+    if (key === 'taper') return startTaper(state);
+    if (key === 'detox') return detox(state);
     return { ok: true, msg: `Paid for: ${entry.name}` };
   }
   grantItem(state, key, shopKey);
@@ -317,7 +322,8 @@ function fillStock(state, order) {
 
 /** Price multiplier for a buyer at their current trust. */
 export function buyerMult(state, key) {
-  return TR.priceMult[buyerLevel(state, key)] * E.buyers[key].mod;
+  const lv = buyerLevel(state, key);
+  return TR.priceMult[lv] * E.buyers[key].mod * buyerPenalty(state, lv);
 }
 
 /** Preview/execute: grams you can deliver and the payout. */
@@ -488,6 +494,7 @@ export function askAround(state) {
 function drinkAtBar(state) {
   const eco = state.economy;
   eco.drinks++;
+  useSubstance(state, 'booze');
   if (eco.drinks >= E.barDrinksToTalk) discoverBuyer(state, 'marla', 'a chat at the bar');
 }
 

@@ -70,6 +70,9 @@ function readInput() {
   if (input.wasPressed('KeyB')) inp.bikePressed = true;
   if (input.wasPressed('KeyR')) inp.reloadPressed = true;
   if (input.wasPressed('KeyC')) inp.clonePressed = true;
+  if (input.wasPressed('KeyZ')) inp.useSub = 'crank';
+  if (input.wasPressed('KeyX')) inp.useSub = 'blues';
+  if (input.wasPressed('KeyV')) inp.useSub = 'weed';
   inp.alt = k.has('AltLeft') || k.has('AltRight');
   inp.aimX = input.mouse.x + renderer.cam.rx;          // mouse -> world cell
   inp.aimY = input.mouse.y + renderer.cam.ry;
@@ -91,6 +94,7 @@ function flushOneShots() {
   inp.bikePressed = false;
   inp.reloadPressed = false;
   inp.clonePressed = false;
+  inp.useSub = null;
   inp.hotbar = -1;
   inp.wheel = 0;
   inp.select = 0;

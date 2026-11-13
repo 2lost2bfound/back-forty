@@ -11,6 +11,7 @@ import {
   buyerLevel, buyerMult, BUYER_KEYS, carriedGrams, carryCap,
 } from '../sim/economy.js';
 import { journalView, hasLevel } from '../sim/mastery.js';
+import { status as addStatus, useSubstance } from '../sim/addiction.js';
 import { baseGenome } from '../sim/genetics.js';
 import * as audio from '../audio/audio.js';
 import { refuseFee, payTribute, rv } from '../sim/threats.js';
@@ -162,7 +163,7 @@ export function initMenus(hud) {
     const eco = state.economy;
     phonePanel.body.textContent = '';
     const tabs = el('div', 'menu-row', phonePanel.body);
-    for (const t of ['orders', 'contacts', 'ledger', 'heat', 'crew', 'journal']) {
+    for (const t of ['orders', 'contacts', 'ledger', 'heat', 'crew', 'journal', 'status']) {
       const b = el('button', 'menu-btn', tabs, t === phoneTab ? `[${t}]` : t);
       b.onclick = () => { phoneTab = t; renderPhone(); };
     }
@@ -206,6 +207,8 @@ export function initMenus(hud) {
       renderCrewTab(state);
     } else if (phoneTab === 'journal') {
       renderJournal(state);
+    } else if (phoneTab === 'status') {
+      renderStatus(state);
     } else if (phoneTab === 'contacts') {
       for (const key of BUYER_KEYS) {
         const b = eco.buyers[key];
@@ -245,6 +248,26 @@ export function initMenus(hud) {
       el('div', 'journal-yield', col).style.height = `${Math.round(60 * h.grams / maxG)}px`;
       el('div', 'journal-quality', col).style.height = `${Math.round(60 * h.quality / 100)}px`;
     }
+  }
+
+  /** Addiction status (plan §A12): dependence, buffs, withdrawal, recovery, and the doses you carry. */
+  function renderStatus(state) {
+    const body = phonePanel.body;
+    const s = addStatus(state);
+    el('div', 'menu-note', body,
+      `${s.stage.toUpperCase()}${s.withdrawal ? ' · WITHDRAWAL' : ''}${s.craving ? ' · CRAVING' : ''}${s.taper ? ' · taper kit' : ''}` +
+      `${s.recovery !== null ? ` · in recovery (${Math.ceil(s.recovery)} days left)` : s.clean ? ' · clean' : ''}` +
+      ` · max HP ${s.maxHp} · overdoses ${s.overdoses}/${CONFIG.addiction.overdose.fatal}`);
+    for (const x of s.subs) {
+      const row = el('div', 'menu-row', body,
+        `${CONFIG.itemNames[x.key]}: dependence ${x.d} (${x.stage})${x.buffLeft > 0 ? ` · active ${x.buffLeft.toFixed(1)} gh` : ''}` +
+        `${x.crashLeft > 0 ? ` · crash ${x.crashLeft.toFixed(1)} gh` : ''}${x.withdrawing ? ' · needs a dose' : ''}`);
+      const held = state.player.inv[x.key] || 0;
+      if (held > 0) el('button', 'menu-btn', row, `Take (${held})`).onclick = () => { hud.toast(useSubstance(state, x.key).msg); renderPhone(); };
+    }
+    const w = el('div', 'menu-row', body, `Own weed${s.weedLeft > 0 ? ` · active ${s.weedLeft.toFixed(1)} gh` : ''}`);
+    el('button', 'menu-btn', w, 'Smoke 1 g').onclick = () => { hud.toast(useSubstance(state, 'weed').msg); renderPhone(); };
+    el('div', 'menu-note', body, 'Keys: Z crank, X blues, V smoke your own. Clinic: taper kit and detox.');
   }
 
   function renderCrewTab(state) {
@@ -300,6 +323,7 @@ export function initMenus(hud) {
     noticePanel.body.textContent = '';
     el('div', 'menu-report-line', noticePanel.body,
       reason === 'prison' ? 'Third arrest. The judge is not feeling generous.'
+        : reason === 'overdose' ? 'A third overdose. This time nobody gets you to the clinic in time.'
         : reason === 'fugitive' ? 'You killed an officer. Fugitive: the SWAT team came at dawn.' : 'Game over.');
     const row = el('div', 'menu-row', noticePanel.body);
     el('button', 'menu-btn', row, 'Load last autosave').onclick = () =>

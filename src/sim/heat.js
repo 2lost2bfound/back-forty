@@ -14,6 +14,7 @@ import { CONFIG } from '../config.js';
 import { withStateRng } from '../rng.js';
 import { stageOf } from './plants.js';
 import { checkLose } from './license.js';
+import { stressEvent } from './addiction.js';
 import { roomOf, isBuried, visibleFromRoad } from '../world/rooms.js';
 import { findPath } from '../world/nav.js';
 
@@ -186,6 +187,7 @@ function startRaid(state) {
   const path = findPath(state, from, to) || [from, to];
   h.raid = { t: 0, cops, path: path.map((c) => [c.x, c.y]) };
   wakeUp(state);
+  stressEvent(state);
   state.events.push({ type: 'raidStart', cops });
 }
 

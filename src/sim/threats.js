@@ -22,6 +22,7 @@ import { roomOf, isBuried } from '../world/rooms.js';
 import { raycastSolid } from '../world/physics.js';
 import { damageEntity, enemyShoot, hurtPlayer, stepCops, groundY, HOSTILE_KINDS } from '../entities/combat.js';
 import { dogHomeX } from '../entities/dog.js';
+import { stressEvent } from './addiction.js';
 
 const TH = CONFIG.threats;
 const BI = TH.breakIn;
@@ -367,6 +368,7 @@ function finishEscape(state, e) {
   const g = lootGrams(e.loot);
   const n = e.loot ? e.loot.plants.length : 0;
   if (!e.loot) return;
+  stressEvent(state);
   t.stats.stolenGrams += g;
   t.stats.uprooted += n;
   const line = n ? `A thief uprooted ${n} plant(s) and got away.` : `A thief got away with ${Math.round(g)} g of product.`;

@@ -378,7 +378,7 @@ export const CONFIG = {
       bat: 40, pistol22: 350, pistol9: 700, shotgun: 1200, rifle: 2000,
       ammo_22: 10, ammo_9: 15, ammo_shell: 15, ammo_rifle: 16,
       scanner: 250, safe: 500, bandage: 20, suppressor: 900,
-      drink: 5, rumor: 20, ask_around: 50,
+      drink: 5, rumor: 20, ask_around: 50, crank: 30, blues: 20,
       heal: 100, vet: 150, detox: 1500, taper: 100,
       lawyer: 200, permit: 3000, bribe: 500,
     },
@@ -397,7 +397,7 @@ export const CONFIG = {
       pawn: ['bat', 'pistol22', 'pistol9', 'shotgun', 'rifle', 'ammo_22', 'ammo_9',
         'ammo_shell', 'ammo_rifle', 'scanner', 'safe', 'bandage'],
       walt: ['dog'],
-      alley: ['pistol22', 'pistol9', 'shotgun', 'rifle', 'suppressor'],
+      alley: ['crank', 'blues', 'pistol22', 'pistol9', 'shotgun', 'rifle', 'suppressor'],
       bar: ['drink', 'rumor', 'ask_around', 'bribe', 'truce'],
       clinic: ['heal', 'vet', 'detox', 'taper'],
       townhall: ['lawyer', 'permit'],
@@ -592,9 +592,42 @@ export const CONFIG = {
     shotgun: 'Pump shotgun', rifle: 'Hunting rifle', ammo_22: '.22 rounds',
     ammo_9: '9 mm rounds', ammo_shell: 'Shotgun shells', ammo_rifle: 'Rifle rounds',
     scanner: 'Police scanner', safe: 'Safe', bandage: 'Bandage', suppressor: 'Suppressor',
-    drink: 'Drink', rumor: 'Rumor', bribe: 'Bribe the deputy', ask_around: 'Ask around for buyers',
+    crank: 'Crank', blues: 'Blues', drink: 'Drink', rumor: 'Rumor', bribe: 'Bribe the deputy', ask_around: 'Ask around for buyers',
     heal: 'Full heal', vet: 'Vet', detox: 'Detox', taper: 'Taper kit (1 day)',
     lawyer: 'Lawyer retainer (1 day)', permit: 'Farm-stand permit', truce: 'Truce with Dale',
+  },
+
+  // Addiction (plan §A12). Three substances plus smoking your own product.
+  // gain = dependence per use; buffGh/crashGh in game hours; tolerance
+  // shortens a buff by D/200. Stage thresholds and withdrawal windows in gh.
+  addiction: {
+    substances: {
+      crank: { gain: 8, buffGh: 8, crashGh: 4, tendMult: 0.6, crashTendMult: 1.3, moveMult: 1.25, crashMoveMult: 0.8, hard: true },
+      blues: { gain: 6, buffGh: 6, heal: 20, damageMult: 0.7, hard: true },
+      booze: { gain: 2, buffGh: 3, friendshipMult: 1.5, spreadMult: 1.3, hard: false },
+    },
+    weed: { buffGh: 4, grams: 1, tendMult: 1.1, penaltyMult: 0.75 }, // own product: no dependence
+    dMax: 100, tolerancePerD: 200,
+    dealer: { markupPer: 20, markupStep: 0.1, markupMax: 0.5 },      // +10% per 20 D, up to +50%
+    hookedAt: 30, addictedAt: 60,
+    windowGh: { hooked: 24, addicted: 12 },                          // a dose needed this often
+    fallPerDay: { casual: 2, coldTurkey: 8, taper: 12 },
+    // Per tier: tending time x, fumble chance, max stamina loss, max HP loss.
+    // withdrawal tiers apply while in withdrawal; baseline = Addicted but dosed.
+    hookedWithdrawal: { tend: 1.5, fumble: 0.10, stamina: 0.25, hp: 0, hpBlues: 0 },
+    addictedWithdrawal: { tend: 2.0, fumble: 0.25, stamina: 0.50, hp: 20, hpBlues: 30 },
+    baseline: { tend: 1.0, fumble: 0.05, stamina: 0.20, hp: 20, hpBlues: 30 },
+    fumbleExtraPour: 1,                     // a double pour adds one more pour (+70 total)
+    permHpPerDay: 1, permHpFloor: 60, permHpRegainAfterDays: 5,
+    compulsion: {
+      afterWithdrawalGh: 6, mossTiles: 10, mossChance: 0.5, cravingChance: 0.3,
+      sponsorMult: 0.5, checkGh: 1, controlLossS: 2,
+    },
+    overdose: { windowGh: 6, from: 3, chance: 0.25, step: 0.25, bill: 400, heat: 5, hpLoss: 5, fatal: 3 },
+    taper: { stamina: 0.15, coverGh: 24, rebuyWithinGh: 12 },
+    detox: { setTo: 15, days: 3 },
+    recovery: { days: 14, relapseSnap: 0.75, cleanSnap: 0.5, cravingGh: 2, cravingTendMult: 1.25 },
+    desaturate: 'saturate(0.35)',           // CSS filter on the canvas while in withdrawal
   },
 
   // Headless balance bot policy (tools/balance.js, My Addition 11).

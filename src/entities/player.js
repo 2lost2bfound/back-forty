@@ -26,6 +26,7 @@ import * as plants from '../sim/plants.js';
 import * as economy from '../sim/economy.js';
 import { pedNear } from './npc.js';
 import { isWeapon, attack, startReload, useBandage } from './combat.js';
+import { tendMult, tiredImmune, moveMult, staminaMult, rollFumble, useSubstance } from '../sim/addiction.js';
 import { installLock, canPlaceCamera, waterPoisoned, purgeWater, installBarrelLock } from '../sim/threats.js';
 
 const TS = CONFIG.world.tile;
@@ -133,13 +134,21 @@ export function assignHotbar(state, index, key) {
 export function actionDuration(state, base) {
   const p = state.player;
   const levelMult = 1 - CONFIG.mastery.tendingPerLevel * ((p.level || 1) - 1);
-  const tiredMult = p.awakeHours > CONFIG.player.tiredAfterGh ? CONFIG.player.tiredTendingMult : 1;
-  return base * levelMult * tiredMult;
+  const tiredMult = p.awakeHours > CONFIG.player.tiredAfterGh && !tiredImmune(state) ? CONFIG.player.tiredTendingMult : 1;
+  return base * levelMult * tiredMult * tendMult(state);
 }
 
 /** Advance the player one fixed 1/60 s physics step. */
 export function stepPlayer(state, inp, dt) {
   const p = state.player;
+  // Compulsion: the player loses control for a moment (plan §A12).
+  if (p.locS > 0) {
+    p.locS -= dt;
+    p.action = null;
+    inp = { ...inp, left: false, right: false, up: false, down: false, sprint: false, digHeld: false,
+      jumpPressed: false, tendPressed: false, placePressed: false, interactPressed: false };
+  }
+  if (inp.useSub) { const r = useSubstance(state, inp.useSub); if (r.msg) state.events.push({ type: 'toast', msg: r.msg }); inp.useSub = null; }
   const grid = state.tiles;
   const C = CONFIG.player;
   const Ph = CONFIG.physics;
@@ -162,6 +171,8 @@ export function stepPlayer(state, inp, dt) {
   if (inp.wheel) { cycleHotbar(state, inp.wheel > 0 ? 1 : -1); inp.wheel = 0; }
   if (inp.select) { p.selected = inp.select; inp.select = 0; }
 
+  const smax = C.staminaMax * staminaMult(state);
+  if (p.stamina > smax) p.stamina = smax;
   // Stamina (§A9: sprint −10/s, regen +15/s) with a small exhausted hysteresis.
   const moving = (inp.right ? 1 : 0) !== (inp.left ? 1 : 0);
   p.sprinting = inp.sprint && moving && p.stamina > 0 && !p.exhausted && !p.riding;
@@ -169,7 +180,7 @@ export function stepPlayer(state, inp, dt) {
     p.stamina -= C.sprintStaminaDrain * dt;
     if (p.stamina <= 0) { p.stamina = 0; p.exhausted = true; p.sprinting = false; }
   } else {
-    p.stamina = Math.min(C.staminaMax, p.stamina + C.staminaRegen * dt);
+    p.stamina = Math.min(smax, p.stamina + C.staminaRegen * dt);
     if (p.exhausted && p.stamina >= C.sprintMinStamina) p.exhausted = false;
   }
   if (inp.bikePressed) {
@@ -178,7 +189,7 @@ export function stepPlayer(state, inp, dt) {
     else if (p.inv.bicycle > 0) p.riding = true;
   }
   if (p.riding && p.onLadder) p.riding = false;
-  const speed = p.riding ? CONFIG.economy.bikeSpeed : p.sprinting ? Ph.sprintSpeed : Ph.walkSpeed;
+  const speed = p.riding ? CONFIG.economy.bikeSpeed : (p.sprinting ? Ph.sprintSpeed : Ph.walkSpeed) * moveMult(state);
   const dir = (inp.right ? 1 : 0) - (inp.left ? 1 : 0);
   if (dir) p.facing = dir;
 
@@ -261,6 +272,7 @@ function completeAction(state, a) {
       if (!plant || plant.dead) return;
       const ph = state.player.canWater === 'barrel' ? PS.barrelPourPh : PS.tapPourPh;
       plants.waterPour(state, plant, ph, state.player.canWater);
+      if (rollFumble(state)) plants.waterPour(state, plant, ph, state.player.canWater); // double pour
       state.player.canCharges--;
       state.events.push({ type: 'action', name: 'pour' });
       break;
@@ -270,6 +282,7 @@ function completeAction(state, a) {
       if ((state.player.inv.nutrients || 0) <= 0) return;
       state.player.inv.nutrients--;
       plants.feedDose(state, plant);
+      if (rollFumble(state)) plants.feedDose(state, plant); // double dose
       state.events.push({ type: 'action', name: 'feed' });
       break;
     }
@@ -284,7 +297,7 @@ function completeAction(state, a) {
       if (!plant || plant.dead) return;
       if ((state.player.inv.phkit || 0) <= 0) return;
       state.player.inv.phkit--;
-      plants.phAdjust(state, plant, a.dir);
+      plants.phAdjust(state, plant, rollFumble(state) ? -a.dir : a.dir); // fumble: wrong way
       state.events.push({ type: 'action', name: 'ph' });
       break;
     }

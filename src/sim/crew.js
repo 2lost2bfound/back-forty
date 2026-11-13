@@ -13,6 +13,7 @@ import { tt, rivalBump, crossed } from './threats.js';
 import { waterPour, feedDose, phAdjust, neemPlant, potOf, stageOf } from './plants.js';
 import { damageEntity, gunNoise, groundY, isHostile } from '../entities/combat.js';
 import { raycastSolid } from '../world/physics.js';
+import { stressEvent } from './addiction.js';
 
 const C = CONFIG.crew;
 const RN = C.runner;
@@ -273,6 +274,7 @@ function busted(state, m, order, bag) {
   m.status = 'jailed';
   m.bailed = false;
   m.backAt = nowGh(state) + RN.jailDays * DAY;
+  stressEvent(state);
   toast(state, `${m.name} was busted with the product. Bail is $${RN.bail}.`);
   if (m.loyalty < RN.snitchBelow) {
     heatEvent(state, 'runnerSnitch');

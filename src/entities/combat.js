@@ -12,6 +12,7 @@ import { withStateRng } from '../rng.js';
 import { tileAt, isSolidId } from '../world/tiles.js';
 import { raycastSolid } from '../world/physics.js';
 import { noiseMult, nightKey } from '../sim/time.js';
+import { maxHp, damageMult } from '../sim/addiction.js';
 import { heatEvent, hs, arrestPlayer, payFine } from '../sim/heat.js';
 
 const W = CONFIG.weapons;
@@ -185,7 +186,7 @@ export function attack(state, aimX, aimY) {
 /** Bandage: +30 hp over 5 s. */
 export function useBandage(state) {
   const p = state.player;
-  if ((p.inv.bandage || 0) <= 0 || p.hp >= C.playerHp) return false;
+  if ((p.inv.bandage || 0) <= 0 || p.hp >= maxHp(state)) return false;
   p.inv.bandage--;
   p.heal = (p.heal || 0) + C.bandage.hp;
   return true;
@@ -219,10 +220,10 @@ export function stepCombat(state, dt) {
     }
   }
   if (p.heal > 0 && p.hp > 0) {
-    const g = Math.min(p.heal, C.bandage.hp / C.bandage.seconds * dt, C.playerHp - p.hp);
+    const g = Math.min(p.heal, C.bandage.hp / C.bandage.seconds * dt, maxHp(state) - p.hp);
     p.hp += g;
     p.heal -= g;
-    if (p.hp >= C.playerHp) p.heal = 0;
+    if (p.hp >= maxHp(state)) p.heal = 0;
   }
   stepBullets(state, dt);
 }
@@ -378,6 +379,7 @@ export function enemyShoot(state, from, dmg, accuracy, src) {
 export function hurtPlayer(state, dmg, src) {
   const p = state.player;
   if (p.downed) return;
+  dmg *= damageMult(state);
   p.hp = Math.max(0, p.hp - dmg);
   state.events.push({ type: 'hurt', dmg, src });
   if (p.hp > 0) return;

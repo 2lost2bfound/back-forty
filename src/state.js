@@ -17,6 +17,7 @@ import { initHeatState } from './sim/heat.js';
 import { initThreats } from './sim/threats.js';
 import { initCrew } from './sim/crew.js';
 import { initGenetics } from './sim/genetics.js';
+import { initAddiction } from './sim/addiction.js';
 
 export const SAVE_PREFIX = 'backforty';
 export const slotKey = (n) => `${SAVE_PREFIX}.slot${n}`;
@@ -53,6 +54,7 @@ export function newGame(seed) {
     threats: initThreats(seed), // director, lock, dog, feud, rival (saved)
     crew: initCrew(seed),       // candidates and hired help (saved)
     genetics: initGenetics(seed), // clone-drift PRNG stream (saved)
+    addiction: initAddiction(seed), // dependence, buffs, recovery, own PRNG (saved)
     entities: [],               // runtime: thieves/bikers
     bullets: [],                // runtime: the player's pooled bullets
     gameOver: null,             // { reason } once a lose condition fires
@@ -188,6 +190,7 @@ export function serializeState(state) {
     threats: state.threats,
     crew: state.crew,
     genetics: state.genetics,
+    addiction: state.addiction,
     gameOver: state.gameOver,
   });
 }
@@ -233,6 +236,7 @@ export function deserializeState(json) {
     threats: o.threats || initThreats(o.seed),
     crew: o.crew || initCrew(o.seed),
     genetics: o.genetics || initGenetics(o.seed),
+    addiction: o.addiction || initAddiction(o.seed),
     entities: [],
     bullets: [],
     gameOver: o.gameOver || null,

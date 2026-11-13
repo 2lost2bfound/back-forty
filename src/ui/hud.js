@@ -7,6 +7,7 @@ import { formatClock, weatherNow } from '../sim/time.js';
 import { heatTier } from '../sim/heat.js';
 import { nowGh } from '../sim/economy.js';
 import { tileInfo, itemKeyFor } from '../world/tiles.js';
+import { status as addStatus } from '../sim/addiction.js';
 import { isGun, isWeapon, ammoOf } from '../entities/combat.js';
 
 const U = CONFIG.ui;
@@ -55,6 +56,8 @@ export function initHud() {
   const heatFill = el('div', 'hud-bar-fill heat', heatOuter);
   const heatLabel = el('span', 'hud-bar-label', heatOuter);
 
+  const addictEl = el('div', 'hud-addict', root);
+  const canvas = document.getElementById('game');
   const promptEl = el('div', 'hud-prompt', root);
 
   const toasts = el('div', 'hud-toasts', root);
@@ -141,6 +144,22 @@ export function initHud() {
         return `${CONFIG.economy.buyers[o.buyer].name} ${o.grams}g ${left >= 0 ? `${Math.ceil(left)}h` : 'LATE'}`;
       }).join('\n');
       if (ordStr !== lastOrders) { lastOrders = ordStr; ordersEl.textContent = ordStr; }
+
+      // Buff / withdrawal icons and the screen desaturation: toggled, not animated.
+      const as = addStatus(state);
+      const tags = [];
+      for (const x of as.subs) {
+        if (x.buffLeft > 0) tags.push(`${x.key.toUpperCase()} ${Math.ceil(x.buffLeft)}h`);
+        else if (x.crashLeft > 0) tags.push(`${x.key.toUpperCase()} CRASH`);
+      }
+      if (as.weedLeft > 0) tags.push('HIGH');
+      if (as.withdrawal) tags.push('WITHDRAWAL');
+      if (as.craving) tags.push('CRAVING');
+      if (as.taper) tags.push('TAPER');
+      const addStr = tags.join('  ');
+      if (addStr !== addictEl.textContent) addictEl.textContent = addStr;
+      const filter = as.withdrawal ? CONFIG.addiction.desaturate : '';
+      if (canvas && canvas.style.filter !== filter) canvas.style.filter = filter;
 
       if (hint !== lastPrompt) {
         lastPrompt = hint;

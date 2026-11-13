@@ -10,6 +10,7 @@ import { stepSpawn } from '../entities/spawn.js';
 import { stepCrew } from './crew.js';
 import { stepThreats } from './threats.js';
 import { recoverPlayer } from '../entities/combat.js';
+import { stepAddiction } from './addiction.js';
 
 const SIM_DT = 1 / CONFIG.loop.simHz;
 const nowGh = (s) => s.time.day * 24 + s.time.hour;
@@ -25,6 +26,7 @@ export function stepSim(s, dtReal) {
   stepSpawn(s);
   stepCrew(s, dtReal);
   stepThreats(s, dtReal);
+  stepAddiction(s);
   const h = hs(s);
   if (s.threats.downed) { s.threats.downed = false; skipDays(s, 0); } // woke at the clinic
   if (h.pendingSkip > 0) {

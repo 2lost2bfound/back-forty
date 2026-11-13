@@ -9,4 +9,9 @@ export function checkLose(state) {
     state.gameOver = { reason: 'prison' };
     state.events.push({ type: 'gameOver', reason: 'prison' });
   }
+  // Third overdose = game over (plan §A15).
+  if (!state.gameOver && state.addiction && state.addiction.overdoses >= CONFIG.addiction.overdose.fatal) {
+    state.gameOver = { reason: 'overdose' };
+    state.events.push({ type: 'gameOver', reason: 'overdose' });
+  }
 }

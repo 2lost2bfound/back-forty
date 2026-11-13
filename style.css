@@ -337,3 +337,9 @@ body {
 .trait-bar { position: relative; width: 80px; height: 6px; background: #1a2336; }
 .trait-fill { height: 100%; background: #6fb0dd; }
 .trait-ghost { position: absolute; top: -2px; width: 2px; height: 10px; background: #ffe27a; }
+
+.hud-addict {
+  position: absolute; left: 12px; bottom: 96px;
+  color: #e8c46a; font: bold 11px monospace; text-shadow: 1px 1px 0 #000;
+  white-space: pre; pointer-events: none;
+}
