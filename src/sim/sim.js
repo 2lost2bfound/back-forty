@@ -7,6 +7,8 @@ import { stepPlants } from './plants.js';
 import { stepHeat, hs } from './heat.js';
 import { stepEconomy } from './economy.js';
 import { stepSpawn } from '../entities/spawn.js';
+import { stepThreats } from './threats.js';
+import { recoverPlayer } from '../entities/combat.js';
 
 const SIM_DT = 1 / CONFIG.loop.simHz;
 const nowGh = (s) => s.time.day * 24 + s.time.hour;
@@ -20,12 +22,15 @@ export function stepSim(s, dtReal) {
   stepHeat(s, gh);
   stepEconomy(s, gh);
   stepSpawn(s);
+  stepThreats(s, dtReal);
   const h = hs(s);
+  if (s.threats.downed) { s.threats.downed = false; skipDays(s, 0); } // woke at the clinic
   if (h.pendingSkip > 0) {
     const days = h.pendingSkip;
     h.pendingSkip = 0;
     skipDays(s, days);
   }
+  if (s.player.downed && !h.jailed) recoverPlayer(s);
 }
 
 /**

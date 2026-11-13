@@ -12,6 +12,7 @@
 import { CONFIG } from '../config.js';
 import { withStateRng } from '../rng.js';
 import { rollSeedGenome } from './genetics.js';
+import { canBuyDog, giveDog, dogHurt, healDog } from '../entities/dog.js';
 import {
   addHeat, heatTier, noteSale, noteSpend, bribeDeputy, bribePrice, hireLawyer, rumorText,
 } from './heat.js';
@@ -50,8 +51,13 @@ export function shopStock(shopKey, state) {
 
 export const hardwareStock = () => shopStock('hardware');
 
-function grantItem(state, key) {
+function grantItem(state, key, shopKey) {
   const inv = state.player.inv;
+  // Alley guns are unregistered: found in a raid = arrest (plan §A9).
+  if (shopKey === 'alley' && E.unregStock.includes(key)) {
+    state.player.unreg = { ...(state.player.unreg || {}), [key]: true };
+    state.player.gunUnregistered = true;
+  }
   if (key === 'seeds') {
     // Purchased seeds are feminized and vary ±3 per trait (plan §A4); the
     // genome is rolled at purchase with the save's PRNG and queued in the
@@ -79,6 +85,8 @@ export function buyItem(state, key, shopKey = 'hardware') {
   if (!shopOpen(state.time, shopKey)) return { ok: false, msg: `${E[shopKey].label} is closed.` };
   const p = state.player;
   if (key === 'bribe') return bribeDeputy(state);
+  if (key === 'dog' && !canBuyDog(state)) return { ok: false, msg: 'You already have a dog.' };
+  if (key === 'vet' && !dogHurt(state)) return { ok: false, msg: 'Your dog is fine.' };
   if (p.cash < entry.price) return { ok: false, msg: 'Not enough cash.' };
   if (key === 'ask_around') return askAround(state);
   p.cash -= entry.price;
@@ -91,9 +99,11 @@ export function buyItem(state, key, shopKey = 'hardware') {
     }
     if (key === 'rumor') return { ok: true, msg: rumorText(state) };
     if (key === 'lawyer') hireLawyer(state);
+    if (key === 'dog') giveDog(state);
+    if (key === 'vet') healDog(state);
     return { ok: true, msg: `Paid for: ${entry.name}` };
   }
-  grantItem(state, key);
+  grantItem(state, key, shopKey);
   state.events.push({ type: 'action', name: 'cash' });
   return { ok: true, msg: `Bought ${entry.name}` };
 }

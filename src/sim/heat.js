@@ -36,6 +36,7 @@ export function initHeatState(time) {
     raidU: null, raid: null, snitched: false,
     jailed: false, pendingSkip: 0,
     firedAtPolice: false, lastCarSlot: -1,
+    warnedOfficer: false, officerKilled: false,
   };
 }
 
@@ -171,7 +172,7 @@ export function hatchFindChance(state, heat = state.heat) {
   return clamp01(c);
 }
 
-function wakeUp(state) {
+export function wakeUp(state) {
   if (state.sleeping) { state.sleeping = false; state.sleepRemain = 0; state.events.push({ type: 'wake' }); }
 }
 
@@ -294,7 +295,9 @@ export function applyRaid(state, found) {
     c.cash = (c.cash || 0) - take; cashSeized += take;
   }
   if (found.carried) { const take = p.cash * seize; p.cash -= take; cashSeized += take; }
-  const fine = plants * R.finePerPlant * (lawyer ? R.lawyerFineMult : 1);
+  // A registered gun found beside plants adds a weapons charge (plan §A9).
+  const guns = found.carried && plants > 0 && CONFIG.weapons.order.some((k) => !CONFIG.weapons[k].melee && (p.inv[k] || 0) > 0);
+  const fine = (plants * R.finePerPlant + (guns ? CONFIG.combat.weaponsFine : 0)) * (lawyer ? R.lawyerFineMult : 1);
   const paid = payFine(state, fine);
 
   const gun = !!p.gunUnregistered;
@@ -350,9 +353,9 @@ function upkeepCops(state) {
   const t = state.time.hour;
   const tier = heatTier(state.heat);
   if (!state.cops) state.cops = [];
-  if (t < P.hours.from || t >= P.hours.to) { state.cops.length = 0; return; }
+  if (t < P.hours.from || t >= P.hours.to) { state.cops = state.cops.filter((c) => c.responder); return; }
   const want = tier >= 3 ? P.copsBurning : P.copsOther;
-  while (state.cops.length < want) {
+  while (state.cops.filter((c) => !c.responder).length < want) {
     state.cops.push(withStateRng(state, (rng) => ({
       x: rng.range(P.x0, P.x1) * TS, dir: rng.chance(0.5) ? 1 : -1, coolUntil: 0,
     })));

@@ -11,9 +11,10 @@
 import { CONFIG } from './config.js';
 import { createRng } from './rng.js';
 import { generateWorld } from './world/worldgen.js';
-import { createPlayer } from './entities/player.js';
+import { createPlayer, combatFields } from './entities/player.js';
 import { initEconomy } from './sim/economy.js';
 import { initHeatState } from './sim/heat.js';
+import { initThreats } from './sim/threats.js';
 
 export const SAVE_PREFIX = 'backforty';
 export const slotKey = (n) => `${SAVE_PREFIX}.slot${n}`;
@@ -47,6 +48,9 @@ export function newGame(seed) {
     economy: initEconomy({ day: CONFIG.clock.startDay, hour: CONFIG.clock.startHour }),
     heat: 0,                    // the meter (0-100); everything else is heatState
     heatState: initHeatState({ hour: CONFIG.clock.startHour }),
+    threats: initThreats(seed), // director, lock, dog, feud (saved)
+    entities: [],               // runtime: thieves/bikers
+    bullets: [],                // runtime: the player's pooled bullets
     gameOver: null,             // { reason } once a lose condition fires
     cops: [],                   // runtime: patrol cops in town
     patrolCar: null,            // runtime: the car passing on the road
@@ -177,6 +181,7 @@ export function serializeState(state) {
     economy: state.economy,
     heat: state.heat,
     heatState: state.heatState,
+    threats: state.threats,
     gameOver: state.gameOver,
   });
 }
@@ -198,7 +203,10 @@ export function deserializeState(json) {
     return null;
   }
   if (tiles.length !== CONFIG.world.cols * CONFIG.world.rows) return null;
-  if (o.player) { o.player.arrests = o.player.arrests || 0; o.player.debt = o.player.debt || 0; }
+  if (o.player) {
+    o.player.arrests = o.player.arrests || 0; o.player.debt = o.player.debt || 0;
+    if (o.player.hp === undefined) Object.assign(o.player, combatFields());
+  }
   return {
     version: CONFIG.version,
     seed: o.seed,
@@ -216,6 +224,9 @@ export function deserializeState(json) {
     heat: typeof o.heat === 'number' ? o.heat : 0,
     // Saves from before M4 have no heatState: start it fresh at the saved clock.
     heatState: o.heatState || initHeatState(o.time),
+    threats: o.threats || initThreats(o.seed),
+    entities: [],
+    bullets: [],
     gameOver: o.gameOver || null,
     cops: [],
     patrolCar: null,

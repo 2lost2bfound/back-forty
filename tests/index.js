@@ -10,3 +10,4 @@ import './plants.test.js';
 import './save.test.js';
 import './economy.test.js';
 import './heat.test.js';
+import './threats.test.js';

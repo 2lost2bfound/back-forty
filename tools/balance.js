@@ -13,6 +13,8 @@
 // Policy: water at 40, feed at 40, fix pH, hang wet batches on racks, deliver
 // every order that can be filled, sell overflow on the street, ask around for
 // buyers, and spend cash on pots and seeds (keeping a small reserve).
+// M5: the bot also fits a lock, buys a dog and two floodlights; thieves arrive
+// by the real break-in roll and the bot never fights back (it is not present).
 
 import { CONFIG } from '../src/config.js';
 import { newGame, addObject } from '../src/state.js';
@@ -29,6 +31,7 @@ import {
   carriedGrams, carryCap, BUYER_KEYS, askAround,
 } from '../src/sim/economy.js';
 import { stepSpawn } from '../src/entities/spawn.js';
+import { installLock } from '../src/sim/threats.js';
 
 const B = CONFIG.balance;
 const P = CONFIG.plants;
@@ -42,7 +45,7 @@ export function runBalance(seed = 1, days = B.days, { quiet = false, heat = fals
   let lastDay = s.time.day;
   let nextPotX = B.firstNewPotX;
   const room = { built: false, groups: 0, rackX: B.roomX0 + 40 };
-  let raids = 0, arrests = 0;
+  let raids = 0, arrests = 0, hostile = 0, thefts = 0;
   const floorY = () => s.surface[B.roomX0] + B.roomTop + B.roomRows - 1;
 
   const buy = (key, shop = 'hardware') => {
@@ -227,6 +230,25 @@ export function runBalance(seed = 1, days = B.days, { quiet = false, heat = fals
     s.time.hour = save;
   }
 
+  /** M5: a lock, a dog and two floodlights once there is something worth stealing. */
+  function secure() {
+    const prices = CONFIG.economy.prices;
+    if (s.economy.gross < B.securityAfterGross) return; // nothing worth guarding yet
+    const spare = () => s.player.cash - floor();
+    if (!s.threats.lock && spare() > prices.padlock && buyAnytime('padlock')) installLock(s);
+    if (!s.threats.dog && spare() > prices.dog + B.dogReserve) {
+      const save = s.time.hour;
+      s.time.hour = CONFIG.economy.walt.open;
+      buyItem(s, 'dog', 'walt');
+      s.time.hour = save;
+    }
+    const lights = s.objects.filter((o) => o.kind === 'floodlight').length;
+    if (lights < 2 && spare() > prices.floodlight && buyAnytime('floodlight')) {
+      s.player.inv.floodlight--;
+      addObject(s, { kind: 'floodlight', x: B.firstNewPotX - 4 * (lights + 1), y: s.surface[B.firstNewPotX - 4 * (lights + 1)] - 1 });
+    }
+  }
+
   s.streetToday = 0;
   let ticks = 0;
   const target = Math.floor(s.time.day) + days;
@@ -244,12 +266,14 @@ export function runBalance(seed = 1, days = B.days, { quiet = false, heat = fals
     for (const e of s.events) {
       if (e.type === 'raidStart') raids++;
       if (e.type === 'skipped') arrests++;
+      if (e.type === 'hostile') hostile++;
+      if (e.type === 'theft') thefts++;
     }
     s.events.length = 0;
     if (++ticks % B.policyEvery === 0) { tend(); harvest(); hang(); sell(); }
     if (Math.abs(s.time.hour - B.shopHour) < GH / 2) {
       plantAndExpand();
-      if (heat) { expandRoom(); bribe(); }
+      if (heat) { expandRoom(); bribe(); secure(); }
     }
     if (s.time.day !== lastDay) {
       lastDay = s.time.day;
@@ -257,16 +281,16 @@ export function runBalance(seed = 1, days = B.days, { quiet = false, heat = fals
       const known = BUYER_KEYS.filter((k) => s.economy.buyers[k].known).length;
       rows.push({
         day: s.time.day - 1, cash: Math.round(s.player.cash), gross: Math.round(s.economy.gross),
-        heat: Math.round(s.heat), raids, arrests, plants: s.plants.length, level: s.player.level, buyers: known,
+        heat: Math.round(s.heat), raids, arrests, hostile, thefts, plants: s.plants.length, level: s.player.level, buyers: known,
         carried: Math.round(carriedGrams(s)),
       });
     }
   }
   if (!quiet) {
-    console.log('day  cash    gross   heat raids arrests plants lvl buyers carried');
+    console.log('day  cash    gross   heat raids arrests hostile thefts plants lvl buyers carried');
     for (const r of rows) {
-      console.log([r.day, r.cash, r.gross, r.heat, r.raids, r.arrests, r.plants, r.level, r.buyers, r.carried]
-        .map((v, i) => String(v).padStart([3, 7, 8, 5, 6, 8, 6, 4, 6, 8][i])).join(' '));
+      console.log([r.day, r.cash, r.gross, r.heat, r.raids, r.arrests, r.hostile, r.thefts, r.plants, r.level, r.buyers, r.carried]
+        .map((v, i) => String(v).padStart([3, 7, 8, 5, 6, 8, 8, 7, 6, 4, 6, 8][i])).join(' '));
     }
   }
   return rows;

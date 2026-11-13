@@ -10,6 +10,7 @@ import {
   shopStock, shopOpen, buyItem, orderOf, fillQuote, fillOrder, nowGh, payFee,
   buyerLevel, buyerMult, BUYER_KEYS, carriedGrams, carryCap,
 } from '../sim/economy.js';
+import { refuseFee } from '../sim/threats.js';
 
 function el(tag, cls, parent, text) {
   const e = document.createElement(tag);
@@ -158,6 +159,8 @@ export function initMenus(hud) {
         const row = el('div', 'menu-row', phonePanel.body, `A biker wants $${f.amount}.`);
         const b = el('button', 'menu-btn', row, 'Pay');
         b.onclick = () => { hud.toast(payFee(state).msg); renderPhone(); };
+        const r = el('button', 'menu-btn', row, 'Refuse (he will come for you)');
+        r.onclick = () => { hud.toast(refuseFee(state).msg); renderPhone(); };
       }
     } else if (phoneTab === 'heat') {
       const v = scannerView(state);
@@ -217,7 +220,8 @@ export function initMenus(hud) {
   function openGameOver(reason) {
     noticePanel.body.textContent = '';
     el('div', 'menu-report-line', noticePanel.body,
-      reason === 'prison' ? 'Third arrest. The judge is not feeling generous.' : 'Game over.');
+      reason === 'prison' ? 'Third arrest. The judge is not feeling generous.'
+        : reason === 'fugitive' ? 'You killed an officer. Fugitive: the SWAT team came at dawn.' : 'Game over.');
     const row = el('div', 'menu-row', noticePanel.body);
     el('button', 'menu-btn', row, 'Load last autosave').onclick = () =>
       window.dispatchEvent(new CustomEvent('backforty:loadauto'));

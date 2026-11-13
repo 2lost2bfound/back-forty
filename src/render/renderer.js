@@ -181,6 +181,7 @@ export function createRenderer(canvas) {
 
   // M4 objects are drawn as simple shapes (procedural, no atlas entries).
   const NEW_OBJECTS = {
+    tripwire: '#b9b9b9', floodlight: '#f5f0a0', camera: '#2b2b2b',
     lamp: '#f2e48a', stash: '#7a5a34', safe: '#6c7480', filter: '#3b3f46',
     generator: '#c9632b', hatch: 'rgba(40,28,16,0.9)',
   };
@@ -211,6 +212,29 @@ export function createRenderer(canvas) {
         ctx.fillRect(Math.round(tx * TS + i * 5 - cam.rx), Math.round(ty * TS - 6 - cam.ry), 5, 22);
       }
     }
+  }
+
+  /** M5: thieves, the dog and the player's bullets. */
+  function drawThreats(state, dt) {
+    const k = Math.min(1, (dt || 1 / 60) * 10);
+    for (const e of state.entities || []) {
+      e.rx = e.rx === undefined ? e.x : e.rx + (e.x - e.rx) * k;
+      const sx = Math.round(e.rx - cam.rx);
+      if (sx < -16 || sx > W) continue;
+      const feet = Math.round(e.y - cam.ry);
+      ctx.fillStyle = e.biker ? '#5a3a1e' : '#7a2e2e';
+      if (e.state === 'ko') ctx.fillRect(sx - 11, feet - 6, 22, 6);
+      else ctx.fillRect(sx - 6, feet - 22, 12, 22);
+    }
+    const dog = state.threats && state.threats.dog;
+    if (dog) {
+      const sx = Math.round(dog.x - cam.rx);
+      const feet = Math.round(state.surface[(dog.x / TS) | 0] * TS - cam.ry);
+      ctx.fillStyle = dog.hp > 0 ? '#9a6b3a' : '#6b6b6b';
+      ctx.fillRect(sx - 7, feet - 9, 14, 9);
+    }
+    ctx.fillStyle = '#ffe66b';
+    for (const b of state.bullets || []) ctx.fillRect(Math.round(b.x - cam.rx), Math.round(b.y - cam.ry), 2, 2);
   }
 
   function drawCar(sx, ground, color, lights) {
@@ -313,6 +337,7 @@ export function createRenderer(canvas) {
       drawObjectsAndPlants(state);
       drawPeople(state);
       drawPolice(state);
+      drawThreats(state, dt);
       drawPlayer(state);
       drawDig(state);
       drawHover(state);

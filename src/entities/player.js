@@ -25,17 +25,24 @@ import { moveBody, boxOverlapsId } from '../world/physics.js';
 import * as plants from '../sim/plants.js';
 import * as economy from '../sim/economy.js';
 import { pedNear } from './npc.js';
+import { isWeapon, attack, startReload, useBandage } from './combat.js';
+import { installLock, canPlaceCamera } from '../sim/threats.js';
 
 const TS = CONFIG.world.tile;
 const PS = CONFIG.plants;
-const SHOP_KEYS = ['hardware', 'pawn', 'clinic', 'townhall', 'bar', 'alley'];
+const SHOP_KEYS = ['hardware', 'walt', 'pawn', 'clinic', 'townhall', 'bar', 'alley'];
 
 // Hotbar items that tend a plant with the primary (left) click.
 const TEND_KEYS = { can: 'water', nutrients: 'feed', phkit: 'ph' };
 
 // Objects placed with right click (M4 adds lamps, hiding and stash gear).
 export const PLACEABLE = ['pot', 'rack', 'lamp_cfl', 'lamp_hps', 'lamp_led', 'filter',
-  'generator', 'safe', 'stash', 'hatch'];
+  'generator', 'safe', 'stash', 'hatch', 'tripwire', 'floodlight', 'camera'];
+
+/** Combat fields every player carries (also back-filled into old saves). */
+export function combatFields() {
+  return { hp: CONFIG.combat.playerHp, mag: {}, reload: null, fireCd: 0, heal: 0, crouch: false, downed: false, coverBrokenS: 0 };
+}
 
 export function createPlayer(x, y) {
   const start = CONFIG.player.start;
@@ -64,6 +71,7 @@ export function createPlayer(x, y) {
       pot: 0, soil_potting: 0, soil_living: 0,
       nutrients: 0, phkit: 0,
       moisture_meter: 0, ph_meter: 0, loupe: 0, rack: 0,
+      fists: 1,                 // so fists can sit on the hotbar (plan §A9 tier 0)
     },
     seedBag: [],                // purchased seed genomes, used in order
     cash: CONFIG.economy.startCash,
@@ -76,6 +84,7 @@ export function createPlayer(x, y) {
     canWater: 'tap',            // water source the can was filled from
     action: null,               // {kind, t, dur, plantId, potId, dir}
     dig: { cx: -1, cy: -1, progress: 0 }, // current dig target and accumulated time
+    ...combatFields(),
   };
 }
 
@@ -103,7 +112,7 @@ export function cycleHotbar(state, dir) {
 /** Assign an inventory item key to a hotbar slot (inventory menu). */
 export function assignHotbar(state, index, key) {
   const p = state.player;
-  if (PLACEABLE.includes(key) || key === 'soil_potting' || key === 'soil_living' ||
+  if (PLACEABLE.includes(key) || isWeapon(key) || key === 'bandage' || key === 'soil_potting' || key === 'soil_living' ||
       key === 'can' || key === 'nutrients' || key === 'phkit') {
     p.hotbar[index] = { kind: 'item', key };
   } else if (key === 'dirt' || key === 'wood' || key === 'ladder') {
@@ -138,6 +147,8 @@ export function stepPlayer(state, inp, dt) {
   inp.placePressed = false;
   const interact = !!inp.interactPressed;
   inp.interactPressed = false;
+  const reload = !!inp.reloadPressed;
+  inp.reloadPressed = false;
   if (inp.hotbar !== undefined && inp.hotbar !== null && inp.hotbar !== -1) {
     selectHotbar(state, inp.hotbar);
     inp.hotbar = -1;
@@ -188,8 +199,14 @@ export function stepPlayer(state, inp, dt) {
   moveBody(grid, p, dt, { stepUp: true });
   if (p.onGround) p.walkDist += Math.abs(p.x - prevX); // drives the walk cycle
 
+  p.crouch = !!inp.down && p.onGround && !p.onLadder;
   updateAction(state, p, dt);
-  if (!p.action) {
+  const armed = isWeapon(p.tool) || p.tool === 'bandage';
+  if (reload) startReload(state);
+  if (!p.action && armed && !p.downed) {
+    if (p.tool === 'bandage') { if (inp.tendPressed) { inp.tendPressed = false; useBandage(state); } }
+    else if (inp.digHeld) attack(state, inp.aimX, inp.aimY);
+  } else if (!p.action) {
     updateDig(state, p, inp, dt);
     tryPrimary(state, p, inp);
     trySecondary(state, p, place, inp);
@@ -429,11 +446,13 @@ export function placeObject(state, key, cx, cy) {
   }
   const p = state.player;
   if ((p.inv[key] || 0) <= 0) return false;
+  if (key === 'camera' && !canPlaceCamera(state, cx, cy)) return false;
   const id = state.nextId++;
   let obj;
   if (key === 'pot') obj = { id, kind: 'pot', x: cx, y: cy, soil: 'cheap', soilPh: PS.freshSoilPh, plantId: null };
   else if (key.startsWith('lamp_')) obj = { id, kind: 'lamp', lamp: key, x: cx, y: cy, hours: CONFIG.lamps.hoursNormal };
   else if (key === 'safe' || key === 'stash') obj = { id, kind: key, x: cx, y: cy, cash: 0 };
+  else if (key === 'camera') obj = { id, kind: key, x: cx, y: cy, dir: p.facing || -1, footage: 0 };
   else obj = { id, kind: key, x: cx, y: cy };
   p.inv[key]--;
   state.objects.push(obj);
@@ -517,6 +536,11 @@ export function interactTarget(state) {
     const b = CONFIG.world.buildings.find((x) => x.key === CONFIG.economy[shop].building);
     if (b) consider({ kind: 'shop', shop }, b.x + b.w - 1, state.surface[b.x + b.w - 1] - 1);
   }
+  // The shack door takes a lock from the inventory (plan §A6).
+  if (CONFIG.threats.locks.some((k) => p.inv[k] > 0)) {
+    const sb = CONFIG.world.buildings.find((b) => b.key === 'shack');
+    consider({ kind: 'door' }, sb.x + sb.w - 1, state.surface[sb.x + sb.w - 1] - 1);
+  }
   // Buyers standing at their spot, and pedestrians (street sales).
   for (const key of economy.BUYER_KEYS) {
     if (!economy.buyerPresent(state, key)) continue;
@@ -562,6 +586,7 @@ export function interactHint(state) {
       return o ? `E: Deliver ${nm}'s order (${Math.round(o.grams)} g)` : `E: Talk to ${nm}`;
     }
     case 'ped': return 'E: Offer a stranger some product';
+    case 'door': return 'E: Fit a lock to the door';
     case 'lamp': return `E: Lamp timer ${t.obj.hours} h (switch to ${t.obj.hours === CONFIG.lamps.hoursNormal ? CONFIG.lamps.hoursLong : CONFIG.lamps.hoursNormal} h)`;
     case 'stash': case 'safe': return `E: Use the ${t.kind} (put in / take out)`;
     default: return null;
@@ -650,6 +675,11 @@ export function handleInteract(state) {
     case 'safe':
       state.events.push({ type: 'toast', msg: useContainer(state, obj) });
       break;
+    case 'door': {
+      const r = installLock(state);
+      state.events.push({ type: 'toast', msg: r.msg });
+      break;
+    }
     case 'ped': {
       const r = economy.streetSale(state, t.ped);
       state.events.push({ type: 'toast', msg: r.ok ? `Sold ${r.grams} g for $${Math.round(r.value)}.` : r.msg });

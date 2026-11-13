@@ -101,6 +101,7 @@ body {
 }
 
 .hud-bar-fill.stam { background: #4ad06e; }
+.hud-bar-fill.hp { background: #d8402e; }
 
 .hud-bar-label {
   position: absolute;

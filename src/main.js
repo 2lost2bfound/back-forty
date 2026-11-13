@@ -20,6 +20,7 @@ import { plantByPot } from './sim/plants.js';
 import { sleepStart } from './sim/time.js';
 import { stepSim } from './sim/sim.js';
 import { stepNpcs } from './entities/npc.js';
+import { stepCombat } from './entities/combat.js';
 import { T } from './world/tiles.js';
 
 // ---------------------------------------------------------------- boot ----
@@ -44,7 +45,7 @@ const SIM_DT = 1 / CONFIG.loop.simHz;      // 0.5 s = 1/60 game hour
 const inp = {
   left: false, right: false, up: false, down: false,
   sprint: false, jumpPressed: false,
-  bikePressed: false,
+  bikePressed: false, reloadPressed: false,
   digHeld: false, tendPressed: false, placePressed: false, interactPressed: false,
   aimX: 0, aimY: 0, select: 0,
   hotbar: -1, wheel: 0, alt: false,
@@ -63,6 +64,7 @@ function readInput() {
   inp.placePressed = input.wasButtonPressed(2);        // right click: place / pH Up
   inp.interactPressed = input.wasPressed('KeyE');
   if (input.wasPressed('KeyB')) inp.bikePressed = true;
+  if (input.wasPressed('KeyR')) inp.reloadPressed = true;
   inp.alt = k.has('AltLeft') || k.has('AltRight');
   inp.aimX = input.mouse.x + renderer.cam.rx;          // mouse -> world cell
   inp.aimY = input.mouse.y + renderer.cam.ry;
@@ -82,6 +84,7 @@ function flushOneShots() {
   inp.placePressed = false;
   inp.interactPressed = false;
   inp.bikePressed = false;
+  inp.reloadPressed = false;
   inp.hotbar = -1;
   inp.wheel = 0;
   inp.select = 0;
@@ -92,6 +95,7 @@ function flushOneShots() {
 /** 60 Hz fixed step: player movement, dig/place/tend actions. (§B3) */
 function stepPhysics(s, dt) {
   stepPlayer(s, inp, dt);
+  stepCombat(s, dt);
   stepNpcs(s, dt);
   if (s.stressOn) updateStress(dt);
 }
@@ -174,6 +178,26 @@ function processEvents() {
         hud.toast(ev.source === 'deputy'
           ? 'The deputy phones: "They are coming for you tonight."'
           : `Scanner: a raid is coming in ${ev.gh} hours.`);
+        break;
+      case 'alert':
+        hud.toast(ev.msg);
+        break;
+      case 'hostile':
+        hud.toast(ev.kind === 'thief' ? 'Someone is creeping around the lot.' : 'Trouble is coming for you tonight.');
+        break;
+      case 'ko':
+        hud.toast('Knocked out. He will crawl off, and word gets around.');
+        break;
+      case 'kill':
+        hud.toast('He is dead. That is heat, and somebody will want revenge.');
+        break;
+      case 'officerWarning':
+        menus.openNotice('WARNING: THAT IS AN OFFICER', [
+          'Shooting a police officer: +50 heat and a permanent heat floor of 25.',
+          'The license needs heat of 20 or less. After this it is out of reach for the rest of the run.',
+          'Killing an officer ends the run: you become a Fugitive.',
+          'Aim again and fire only if you mean it.',
+        ]);
         break;
       case 'helicopter':
         hud.toast('A helicopter circles in the dusk.');

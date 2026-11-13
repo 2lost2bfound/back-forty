@@ -55,6 +55,10 @@ export function stepTime(state, dt) {
   }
 }
 
+/** Id of the night this clock reading belongs to (rolls at 06:00; the day
+ *  number increments at midnight, so 23:00 and 01:00 share one key). */
+export const nightKey = (time) => (time.hour >= C.wakeHour ? time.day + 1 : time.day);
+
 /** Rain is active for rainDurationGh from the 06:00 roll on a rain day. */
 export function isRaining(state) {
   const t = state.time;

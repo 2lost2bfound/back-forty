@@ -330,6 +330,7 @@ export const CONFIG = {
     // Shops: the building whose right wall is the door, and opening hours
     // (open > close wraps past midnight). Plan §A3 schedule.
     hardware: { building: 'hardware', label: 'Hardware store', open: 8, close: 18 },
+    walt:     { building: 'walts',    label: "Walt's farm",    open: 6, close: 20 },
     pawn:     { building: 'pawn',     label: 'Pawn shop',      open: 10, close: 20 },
     clinic:   { building: 'clinic',   label: 'Clinic',         open: 8, close: 18 },
     townhall: { building: 'townhall', label: 'Town hall',      open: 9, close: 17 },
@@ -342,7 +343,7 @@ export const CONFIG = {
       moisture_meter: 30, ph_meter: 60, loupe: 25, rack: 50,
       neem: 15, lamp_cfl: 80, lamp_hps: 300, lamp_led: 700, drip: 400,
       filter: 200, generator: 900, wood: 2, concrete_tile: 5, ladder: 5,
-      door: 20, lock: 30, hatch: 600, stash: 80, tripwire: 30, floodlight: 120,
+      door: 20, padlock: 50, deadbolt: 200, steeldoor: 800, dog: 300, hatch: 600, stash: 80, tripwire: 30, floodlight: 120,
       camera: 250, pickaxe: 80, cart: 150, bicycle: 200, duffel: 100,
       barrel_lock: 40,
       bat: 40, pistol22: 350, pistol9: 700, shotgun: 1200, rifle: 2000,
@@ -362,17 +363,18 @@ export const CONFIG = {
       hardware: ['seeds', 'pot', 'soil_potting', 'soil_living', 'nutrients', 'phkit',
         'moisture_meter', 'ph_meter', 'loupe', 'rack', 'neem', 'lamp_cfl', 'lamp_hps',
         'lamp_led', 'drip', 'filter', 'generator', 'wood', 'concrete_tile',
-        'ladder', 'door', 'lock', 'hatch', 'stash', 'tripwire', 'floodlight', 'camera',
+        'ladder', 'door', 'padlock', 'deadbolt', 'steeldoor', 'hatch', 'stash', 'tripwire', 'floodlight', 'camera',
         'pickaxe', 'cart', 'bicycle', 'duffel', 'barrel_lock'],
       pawn: ['bat', 'pistol22', 'pistol9', 'shotgun', 'rifle', 'ammo_22', 'ammo_9',
         'ammo_shell', 'ammo_rifle', 'scanner', 'safe', 'bandage'],
+      walt: ['dog'],
       alley: ['pistol22', 'pistol9', 'shotgun', 'rifle', 'suppressor'],
       bar: ['drink', 'rumor', 'ask_around', 'bribe'],
       clinic: ['heal', 'vet', 'detox', 'taper'],
       townhall: ['lawyer', 'permit'],
     },
     unregStock: ['pistol22', 'pistol9', 'shotgun', 'rifle'],
-    services: ['drink', 'rumor', 'ask_around', 'bribe', 'heal', 'vet', 'detox', 'taper', 'lawyer', 'permit'],
+    services: ['dog', 'drink', 'rumor', 'ask_around', 'bribe', 'heal', 'vet', 'detox', 'taper', 'lawyer', 'permit'],
 
     // Carry limits (plan §A5 patrol stops): grams of product on you.
     carry: { backpack: 500, duffel: 2000 },
@@ -437,6 +439,75 @@ export const CONFIG = {
       open: 7, close: 22, reach: 2 },
   },
 
+  // Weapons (plan §A9). melee weapons have reach (px) and stamina cost per swing;
+  // guns have mag, range (tiles), ammo item key and noise radius (tiles).
+  weapons: {
+    order: ['fists', 'bat', 'pistol22', 'pistol9', 'shotgun', 'rifle'],
+    fists:    { melee: true, dmg: 5,  rate: 2.5, reach: 22, knock: 0,  stamina: 12 },
+    bat:      { melee: true, dmg: 18, rate: 2,   reach: 28, knock: 40, stamina: 12 },
+    pistol22: { dmg: 14, rate: 3,   mag: 10, range: 18, ammo: 'ammo_22',    noise: 25, pellets: 1, pistol: true },
+    pistol9:  { dmg: 22, rate: 3,   mag: 12, range: 22, ammo: 'ammo_9',     noise: 35, pellets: 1, pistol: true },
+    shotgun:  { dmg: 9,  rate: 1,   mag: 5,  range: 9,  ammo: 'ammo_shell', noise: 50, pellets: 6, pelletSpread: 12, perShell: true },
+    rifle:    { dmg: 60, rate: 0.7, mag: 4,  range: 40, ammo: 'ammo_rifle', noise: 60, pellets: 1 },
+  },
+
+  // Combat rules (plan §A9, §B6).
+  combat: {
+    playerHp: 100,
+    bulletSpeed: 600,        // px/s
+    spreadStand: 2, spreadMove: 6, withdrawalMult: 2, drunkMult: 1.3, // degrees
+    reloadSeconds: 1.5, reloadPerShell: 0.5,
+    suppressorDiv: 3,        // noise radius divisor (pistols only)
+    bandage: { hp: 30, seconds: 5 },
+    koSeconds: 20,           // a knocked-out enemy crawls off after this long
+    crouchHeadDrop: 10,      // px the head drops while crouched
+    crouchFireGraceS: 1,     // firing breaks cover for this long
+    bodyW: 12, bodyH: 22,    // human hitbox
+    pedW: 8, pedH: 14,
+    shotLandTiles: 2,        // a landing shot this near a thief may scare it
+    incidentGapGh: 0.5,      // shots closer than this belong to one incident
+    dispatch: { heat: 50, shots: 6, delayGh: 3, cops: 2, stayGh: 6, offsetTiles: 6 }, // 90 s = 3 gh
+    downed: { cashLoss: 0.3, bill: 300, wakeHp: 50, haulMult: 2 },
+    officerAimPx: 24,        // aiming this close to a cop triggers the warning
+    cop: { hp: 100, dmg: 15, accuracy: 0.7, rate: 1, rangeTiles: 14 },
+    weaponsFine: 1000,       // registered gun found in a raid
+  },
+
+  // Threats: event director, thieves, security (plan §A3, §A6, §A9).
+  threats: {
+    director: { minNight: { thief: 4, raid: 6, rival: 8 }, keep: 6 },
+    breakIn: {
+      rollHour: 1,
+      valuePerPct: 200,      // +1% per $200 of product on site
+      perRipePlant: 1, perStreetSale: 3, streetSaleDays: 3, generator: 10,
+      min: 0, max: 60,
+      cut: { lock: 5, floodlight: 5, floodlightMax: 2, camera: 5, dog: 15, guard: 20 },
+    },
+    thief: {
+      hp: 60, speed: 100, knife: 15, knifeRate: 1, knifeReach: 20,
+      pistolDay: 20, pistolChance: 0.3, pistolDmg: 12, pistolAcc: 0.5, pistolRate: 1, pistolRangeTiles: 12,
+      twoDay: 20, twoChance: 0.3,
+      fleeHpFrac: 0.5, fleeBitten: 0.6, fleeShot: 0.5,
+      haulGrams: 200, uprootCount: 2, uprootSeconds: 5, grabSeconds: 3,
+      hatchFind: 0.25,
+      spawnX0: 4, spawnX1: 34, escapeX: 2,   // tiles: where they appear / count as gone
+      doorOffsetTiles: 1,                    // stands this far outside the door
+      lockSeconds: { none: 0, padlock: 15, deadbolt: 40, steeldoor: 90 },
+    },
+    locks: ['padlock', 'deadbolt', 'steeldoor'],   // worst to best
+    wordOfMouth: { cut: 10, nights: 5 },           // KO'd thief spreads the word
+    feud: { nights: 3, thieves: 2 },
+    biker: { hp: 80, nights: 0 },                  // refused collection fee: tonight's 01:00
+    camera: { max: 4, coneTiles: 8, shackTiles: 10 },
+    floodlight: { radiusTiles: 8 },
+    tripwire: { },
+    dog: {
+      hp: 50, bite: 10, speed: 110, barkTiles: 12, biteReach: 18, homeTiles: 3,
+      food: 10, hungryDays: 2, thiefBiteStagger: 0.6,
+    },
+    fugitive: { hour: 6 },
+  },
+
   // Inventory items (display names for HUD/hotbar/menus).
   itemNames: {
     can: 'Watering can', seeds: 'Ditch Weed seeds', pot: 'Pot',
@@ -447,7 +518,8 @@ export const CONFIG = {
     pickaxe: 'Pickaxe',
     neem: 'Neem oil', lamp_cfl: 'CFL lamp', lamp_hps: 'HPS lamp', lamp_led: 'LED lamp',
     drip: 'Drip kit', filter: 'Carbon filter', generator: 'Generator',
-    concrete_tile: 'Concrete tile', door: 'Door', lock: 'Lock',
+    concrete_tile: 'Concrete tile', door: 'Door', padlock: 'Padlock', deadbolt: 'Deadbolt',
+    steeldoor: 'Steel door', dog: 'Guard dog', fists: 'Fists',
     hatch: 'Hidden hatch', stash: 'Stash box', tripwire: 'Tripwire',
     floodlight: 'Floodlight', camera: 'Camera', cart: 'Hand cart', bicycle: 'Bicycle',
     duffel: 'Duffel bag', barrel_lock: 'Barrel lock',
@@ -478,6 +550,8 @@ export const CONFIG = {
     outdoorCap: 12,          // plants grown outdoors before the room exists
     roomCost: 1100,          // cash needed to dig the room (hatch + first lamps + filter)
     roomX0: 60, roomWidth: 44, roomTop: 6, roomRows: 3, // tiles below the surface
+    securityAfterGross: 2500, // the bot buys locks/dog/floodlights once it has grossed this much
+    dogReserve: 300,         // cash kept back after buying the dog
     shaftX: 58,              // the shaft (and its hatch) sits just outside the shack
     maxGroups: 7,            // 4 pots + 1 HPS lamp per group (28 plants, under the 30 line)
     generatorAtGroups: 3,    // buy the generator (no lamp heat) from this many groups

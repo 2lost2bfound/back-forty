@@ -7,6 +7,7 @@ import { formatClock, weatherNow } from '../sim/time.js';
 import { heatTier } from '../sim/heat.js';
 import { nowGh } from '../sim/economy.js';
 import { tileInfo, itemKeyFor } from '../world/tiles.js';
+import { isGun, isWeapon, ammoOf } from '../entities/combat.js';
 
 const U = CONFIG.ui;
 const HEAT_NAMES = ['COLD', 'WARM', 'HOT', 'BURNING'];
@@ -33,6 +34,10 @@ export function initHud() {
   const stamFill = el('div', 'hud-bar-fill stam', stamOuter);
   const stamLabel = el('span', 'hud-bar-label', stamOuter);
   stamLabel.textContent = 'STAMINA';
+
+  const hpOuter = el('div', 'hud-bar-outer', barWrap);
+  const hpFill = el('div', 'hud-bar-fill hp', hpOuter);
+  const hpLabel = el('span', 'hud-bar-label', hpOuter);
 
   const hotbar = el('div', 'hud-hotbar', root);
   const slots = [];
@@ -66,6 +71,11 @@ export function initHud() {
     }
     const key = e.key;
     const inv = state.player.inv;
+    if (isGun(key)) {
+      const a = ammoOf(state.player, key);
+      return { name: CONFIG.itemNames[key], count: inv[key] ? `${a.mag}/${a.bag}${state.player.reload && state.player.tool === key ? ' ...' : ''}` : 'none' };
+    }
+    if (isWeapon(key)) return { name: CONFIG.itemNames[key], count: key === 'fists' || inv[key] ? '' : 'none' };
     const tools = ['can', 'pickaxe', 'moisture_meter', 'ph_meter', 'loupe'];
     const count = key === 'nutrients' || key === 'phkit'
       ? `${inv[key] || 0} doses`
@@ -90,6 +100,13 @@ export function initHud() {
       if (stamPct !== stamFill.dataset.v) {
         stamFill.dataset.v = stamPct;
         stamFill.style.width = `${stamPct}%`;
+      }
+
+      const hp = Math.round(state.player.hp);
+      if (hp !== hpFill.dataset.v) {
+        hpFill.dataset.v = hp;
+        hpFill.style.width = `${hp}%`;
+        hpLabel.textContent = `HP ${hp}`;
       }
 
       const tier = heatTier(state.heat);
