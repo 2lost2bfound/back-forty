@@ -126,7 +126,7 @@ export function sellEdibles(state, channel, product, n = 1) {
   } else {
     if (e.dispDay !== state.time.day) { e.dispDay = state.time.day; e.dispToday = 0; }
     e.dispToday += count;
-    state.player.bank = (state.player.bank || 0) + value;
+    state.player.bank = Math.round(((state.player.bank || 0) + value) * 100) / 100; // whole cents
     ledger(state, `Dispensary: ${count} ${name} (Bank)`, value);
   }
   return { ok: true, count, value, msg: `Sold ${count} ${name} for $${Math.round(value)}${buyer ? '' : ' (to the Bank)'}.` };

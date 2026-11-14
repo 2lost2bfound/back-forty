@@ -86,7 +86,7 @@ export function spendMoney(state, amount) {
   if (p.cash + (p.bank || 0) < amount) return false;
   const cash = Math.min(p.cash, amount);
   p.cash -= cash;
-  p.bank = (p.bank || 0) - (amount - cash);
+  p.bank = Math.round(((p.bank || 0) - (amount - cash)) * 100) / 100;
   if (cash > 0) noteSpend(state, cash);
   return true;
 }
@@ -131,7 +131,7 @@ export function launder(state, amount = Infinity) {
   if (amt <= 0) return { ok: false, msg: launderRoom(state) <= 0 ? 'The stand has laundered its limit today.' : 'No cash to launder.' };
   const fee = Math.round(amt * L.front.fee);
   state.player.cash -= amt;
-  state.player.bank = (state.player.bank || 0) + amt - fee;
+  state.player.bank = Math.round(((state.player.bank || 0) + amt - fee) * 100) / 100; // whole cents
   l.launderedToday += amt; l.totalLaundered += amt; l.feesPaid += fee;
   return { ok: true, amount: amt, fee, msg: `Laundered $${amt}: $${amt - fee} to the bank after a $${fee} fee.` };
 }

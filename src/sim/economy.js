@@ -599,6 +599,6 @@ export function sellSeedPacks(state, lineId, n = 1) {
   let value = 0;
   for (const s of mine.slice(0, count)) { value += seedPackPrice(s); bag.splice(bag.indexOf(s), 1); }
   p.seedSoldToday += count;
-  p.bank = (p.bank || 0) + value;
+  p.bank = Math.round(((p.bank || 0) + value) * 100) / 100; // whole cents
   return { ok: true, count, value, msg: `Sold ${count} ${line.name} seeds for $${Math.round(value)} (to the Bank).` };
 }

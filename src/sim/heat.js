@@ -243,7 +243,7 @@ export function searchLot(state, rng) {
 export function payFine(state, amount) {
   const p = state.player;
   let rem = amount;
-  const bank = Math.min(p.bank || 0, rem); p.bank = (p.bank || 0) - bank; rem -= bank;
+  const bank = Math.min(p.bank || 0, rem); p.bank = Math.round(((p.bank || 0) - bank) * 100) / 100; rem -= bank;
   const cash = Math.min(p.cash, rem); p.cash -= cash; rem -= cash;
   if (rem > 0) p.debt = (p.debt || 0) + rem;
   return { paid: amount - rem, debt: rem };

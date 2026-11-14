@@ -213,3 +213,13 @@ test('save/load round-trips a cook in progress and the edible stock; old saves d
   const o = JSON.parse(serializeState(s)); delete o.edibles;
   assert.deepEqual(deserializeState(JSON.stringify(o)).edibles, initEdibles());
 });
+
+test('Bank deposits are whole cents (browser-check: $14.3999...)', () => {
+  const s = game();
+  cooked(s, 'brownies', 70); // quality 70 -> $12 x 1.2 = $14.40 a unit
+  s.player.bank = 0;
+  at(s, 41, 10);
+  for (let i = 0; i < 7; i++) assert.ok(sellEdibles(s, 'dispensary', 'brownies', 1).ok);
+  assert.equal(s.player.bank, 100.8); // 7 x 14.40, no float drift
+  assert.equal(Math.round(s.player.bank * 100), s.player.bank * 100);
+});
