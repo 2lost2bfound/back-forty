@@ -103,6 +103,7 @@ export function initScreens() {
   function openTitle() {
     const body = clear('title');
     el('div', 'menu-report-line', body, 'A grower\'s story in one town. Win the license, or lose it all.');
+    el('div', 'menu-hint', body, `Legacy goal: after the license, win the Harvest Cup (every ${CONFIG.cup.everyDays} days) with a named strain.`);
     const row = el('div', 'menu-row', body, 'Difficulty ');
     for (const [key, d] of Object.entries(CONFIG.difficulty)) {
       const b = button(row, key === difficulty ? `[${d.label}]` : d.label, () => { difficulty = key; openTitle(); });

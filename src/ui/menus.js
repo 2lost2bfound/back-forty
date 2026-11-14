@@ -532,12 +532,14 @@ export function initMenus(hud) {
     el('div', 'menu-note', shopPanel.body, l.granted ? 'You hold the license.'
       : l.applied ? `Application filed on day ${l.applied.day}: the inspector comes on day ${l.applied.day + CONFIG.license.reviewDays} at ${CONFIG.license.inspectHour}:00.`
       : 'Business license: every requirement must hold on the day you apply and through the review.');
-    for (const r of licenseReqs(state)) {
-      el('div', 'menu-report-line', shopPanel.body, `${r.ok ? '[x]' : '[ ]'} ${r.label} (${r.detail})`);
+    if (!l.granted) { // once held, the checklist and Apply are done with
+      for (const r of licenseReqs(state)) {
+        el('div', 'menu-report-line', shopPanel.body, `${r.ok ? '[x]' : '[ ]'} ${r.label} (${r.detail})`);
+      }
+      const row = el('div', 'menu-row', shopPanel.body);
+      el('button', 'menu-btn', row, 'Submit sample').onclick = () => { hud.toast(submitSample(state).msg); renderShop(); };
+      el('button', 'menu-btn', row, 'Apply for the license').onclick = () => { hud.toast(applyLicense(state).msg); renderShop(); };
     }
-    const row = el('div', 'menu-row', shopPanel.body);
-    el('button', 'menu-btn', row, 'Submit sample').onclick = () => { hud.toast(submitSample(state).msg); renderShop(); };
-    el('button', 'menu-btn', row, 'Apply for the license').onclick = () => { hud.toast(applyLicense(state).msg); renderShop(); };
     renderBreedingHall(state);
   }
 

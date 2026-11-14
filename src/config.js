@@ -879,6 +879,7 @@ export const CONFIG = {
   // First-time tips: shown once each, the first time the situation arises.
   tips: {
     start: 'Water and feed your plants, harvest when ripe, sell to Skeet in the park. Tab opens your phone.',
+    store: 'Day 1: the hardware store in town opens at 08:00. Buy nutrients and a pH kit or your first plant will not last.',
     heat: 'Heat rises as you sell and grow. Hide your grow underground and lay low when it climbs.',
     raid: 'Raids seize CASH on your lot, never the bank. Launder cash through the farm stand.',
     license: 'The town hall issues the license: $50,000 in the Bank, the farm stand, Grower level 5, a quality-70 sample, and heat at 20 or less.',

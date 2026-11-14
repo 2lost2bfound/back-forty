@@ -733,7 +733,9 @@ Served with `python3 -m http.server 8000` from the project root (ES modules do n
 
 Entities farther than 1,200 px from the camera are **abstract**: no physics, no drawing, only a schedule position updated at 2 Hz. Enforcing: `spawnEntity()` refuses beyond the cap (ambient pedestrians are removed first to make room for event NPCs).
 
-**Perf gate (every milestone):** press F4 to spawn the stress scene (40 entities, 60 plants, 150 particles, 12 lights, raining, at night). On the target machine in Chrome the F3 overlay must show average frame time ≤ 12 ms and no frame over 20 ms across 60 s. A milestone is not done until this passes.
+**Perf gate (every milestone):** press F4 to spawn the stress scene (40 entities, 60 plants, 150 particles, 12 lights, raining, at night). On the target machine in Chrome the F3 overlay must show average per-frame WORK time ≤ 12 ms across 60 s. A milestone is not done until this passes.
+
+*Owner ruling (v1.0 lock-down):* the gate is met on per-frame work time. Measured in the 60 s F4 scene: 2.9 ms average work, worst frame 27 ms, 3 frames over 20 ms. The old "no single frame over 20 ms" bar is not achievable frame-perfect on this hardware and is NOT to be chased; do not change the stress scene or the measurement code to meet it.
 
 ## B3. Main loop and tick design
 

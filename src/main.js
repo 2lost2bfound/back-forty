@@ -61,6 +61,7 @@ function adopt(next, msg) {
   renderer.invalidate();
   if (msg) hud.toast(msg);
   tip('start');
+  tip('store'); // day-1 must: nutrients + pH kit (a never-shopping player loses the first plant by day 3)
 }
 
 // Browsers only allow sound after a user gesture (plan §B8).
