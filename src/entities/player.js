@@ -29,6 +29,7 @@ import { pedNear } from './npc.js';
 import { isWeapon, attack, startReload, useBandage } from './combat.js';
 import { tendMult, tiredImmune, moveMult, staminaMult, rollFumble, useSubstance } from '../sim/addiction.js';
 import * as allies from '../sim/allies.js';
+import { collectCook } from '../sim/edibles.js';
 import { installLock, canPlaceCamera, waterPoisoned, purgeWater, installBarrelLock } from '../sim/threats.js';
 
 const TS = CONFIG.world.tile;
@@ -40,7 +41,7 @@ const TEND_KEYS = { can: 'water', nutrients: 'feed', phkit: 'ph', neem: 'neem' }
 
 // Objects placed with right click (M4 adds lamps, hiding and stash gear).
 export const PLACEABLE = ['pot', 'rack', 'lamp_cfl', 'lamp_hps', 'lamp_led', 'filter',
-  'generator', 'safe', 'stash', 'hatch', 'tripwire', 'floodlight', 'camera'];
+  'generator', 'safe', 'stash', 'hatch', 'tripwire', 'floodlight', 'camera', 'stove'];
 
 /** Combat fields every player carries (also back-filled into old saves). */
 export function combatFields() {
@@ -533,11 +534,13 @@ export function placeObject(state, key, cx, cy) {
   const p = state.player;
   if ((p.inv[key] || 0) <= 0) return false;
   if (key === 'camera' && !canPlaceCamera(state, cx, cy)) return false;
+  if (key === 'stove' && state.objects.some((o) => o.kind === 'stove')) return false; // one per lot
   const id = state.nextId++;
   let obj;
   if (key === 'pot') obj = { id, kind: 'pot', x: cx, y: cy, soil: 'cheap', soilPh: PS.freshSoilPh, plantId: null };
   else if (key.startsWith('lamp_')) obj = { id, kind: 'lamp', lamp: key, x: cx, y: cy, hours: CONFIG.lamps.hoursNormal };
   else if (key === 'safe' || key === 'stash') obj = { id, kind: key, x: cx, y: cy, cash: 0 };
+  else if (key === 'stove') obj = { id, kind: 'stove', x: cx, y: cy, cook: null };
   else if (key === 'camera') obj = { id, kind: key, x: cx, y: cy, dir: p.facing || -1, footage: 0 };
   else obj = { id, kind: key, x: cx, y: cy };
   p.inv[key]--;
@@ -614,7 +617,7 @@ export function interactTarget(state) {
       consider({ kind: 'barrel', obj: o }, x, y);
     } else if (o.kind === 'bed') {
       consider({ kind: 'bed', obj: o }, x, y);
-    } else if (o.kind === 'lamp' || o.kind === 'stash' || o.kind === 'safe' || o.kind === 'farmstand') {
+    } else if (o.kind === 'lamp' || o.kind === 'stash' || o.kind === 'safe' || o.kind === 'farmstand' || o.kind === 'stove') {
       consider({ kind: o.kind, obj: o }, x, y);
     }
   }
@@ -691,6 +694,7 @@ export function interactHint(state) {
     case 'lamp': return `E: Lamp timer ${t.obj.hours} h (switch to ${t.obj.hours === CONFIG.lamps.hoursNormal ? CONFIG.lamps.hoursLong : CONFIG.lamps.hoursNormal} h)`;
     case 'stash': case 'safe': return `E: Use the ${t.kind} (put in / take out)`;
     case 'farmstand': return 'E: Farm stand (launder cash)';
+    case 'stove': return t.obj.cook && t.obj.cook.left <= 0 ? 'E: Collect the finished batch' : 'E: Kitchen stove';
     default: return null;
   }
 }
@@ -793,6 +797,10 @@ export function handleInteract(state) {
       break;
     case 'farmstand':
       state.events.push({ type: 'openStand' });
+      break;
+    case 'stove':
+      if (obj.cook && obj.cook.left <= 0) state.events.push({ type: 'toast', msg: collectCook(state, obj).msg });
+      else state.events.push({ type: 'openKitchen' });
       break;
     case 'door': {
       const r = installLock(state);

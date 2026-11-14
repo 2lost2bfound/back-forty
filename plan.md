@@ -1036,4 +1036,47 @@ Rules for the builder:
 
 ---
 
-*End of plan. v1 = Milestones 0–10. Prestige = Milestone 11.*
+---
+
+# DELIVERABLE 6 — MILESTONE 12: EDIBLES (post-license)
+
+Added after v1. Decisions made with the owner: kitchen + cook timer, three products, sold at the dispensary AND to buyers, named strains carry a small bonus. Every number below goes in `config.js` under `edibles`.
+
+### Unlock
+Edibles unlock when the player holds the license (`state.license` granted — normal win or Legacy). Before that the kitchen is not sold and recipes are refused.
+
+### Kitchen
+- **Kitchen stove**, hardware store, **$1,500**, license required. Placeable object (inside the lot, indoors or out), one per lot. E opens the kitchen panel.
+- One batch cooks at a time. The cook runs on game time (keeps cooking while asleep or away) and the finished batch waits in the stove until collected (E).
+
+### Recipes (per batch)
+| Product | Dry bud | Ingredients (paid at start) | Cook time | Units out | Base price / unit |
+|---|---|---|---|---|---|
+| Brownies | 7 g | $20 | 4 gh | 10 | $12 |
+| Gummies | 5 g | $15 | 6 gh | 20 | $5 |
+| Chocolate bars | 10 g | $30 | 3 gh | 8 | $18 |
+
+- The player picks the recipe and which dry batch to use (dry bud only; wet is refused). Ingredients are paid cash-first then Bank, like other purchases.
+- Edible **quality** = the bud batch's quality. Edibles are stored as batches: product, quality, units, strain name/lineId — batches of the same product + strain + quality merge.
+- **Unit price** = base × (0.5 + quality / 100) × channel multiplier × named bonus.
+
+### Selling
+- **Dispensary (town hall, 9–17):** legal. Channel ×1.0, pays into the **Bank** (clean), **no heat**. Cap **40 units a day** across all products.
+- **Buyers:** any revealed buyer at their spot, trust 2+, buys up to **10 units a day** each. Channel **×1.25**, paid in **cash (dirty)**, **+1 heat per sale** (heat source `edibleSale`, logged like the others). Undercover risk applies only to street pedestrians, and pedestrians do not buy edibles.
+- **Named strain bonus:** edibles made from a named line carry the line name; +15% at the dispensary always, at buyers only at trust 3+ (same rule as named bud).
+
+### Legal status
+Edibles in the stove, inventory or stash are licensed stock: raids do not seize them and they add no visible/smell heat. Only buyer sales generate heat.
+
+### UI
+- Kitchen panel: recipe list with costs, dry-batch picker, Start, progress (time left), Collect.
+- Inventory and the phone ledger show edible batches and edible sales. Town-hall dispensary rows gain "Sell edibles" (1 / 10). Buyer interaction gains "Sell edibles".
+- Procedural sprites: stove (idle / cooking with a glow), one small icon per product for the hotbar/inventory.
+
+### M12 — Edibles
+**Files:** `src/sim/edibles.js` (new), `config.js` (`edibles`), `economy.js` (dispensary + buyer edible sales, named bonus), `heat.js` (`edibleSale` source), `player.js` (place stove, E on stove), `state.js` (save/load, migration for old saves), `menus.js` (kitchen panel, dispensary/buyer rows, inventory, ledger), `spritedata.js` (stove + icons), `tests/edibles.test.js`.
+**Done when:** without a license the stove and recipes are refused; with one, each recipe consumes the stated bud + ingredients, cooks for the stated game hours (including while asleep), and yields the stated units at the bud's quality; prices follow the formula on both channels; the dispensary pays the Bank with no heat and respects the 40/day cap; buyers pay dirty cash, add +1 heat per sale, respect trust 2+ and 10/day; named-line edibles get the bonus; raids leave edibles alone; save/load round-trips a cook in progress; all v1/M11 tests still pass and the balance gate is unchanged.
+
+---
+
+*End of plan. v1 = Milestones 0–10. Prestige = Milestone 11. Edibles = Milestone 12.*

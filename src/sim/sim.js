@@ -13,6 +13,7 @@ import { recoverPlayer } from '../entities/combat.js';
 import { stepAddiction } from './addiction.js';
 import { stepAllies, reviving } from './allies.js';
 import { stepLicense } from './license.js';
+import { stepEdibles } from './edibles.js';
 
 const SIM_DT = 1 / CONFIG.loop.simHz;
 const nowGh = (s) => s.time.day * 24 + s.time.hour;
@@ -25,6 +26,7 @@ export function stepSim(s, dtReal) {
   stepPlants(s, gh);
   stepHeat(s, gh);
   stepEconomy(s, gh);
+  stepEdibles(s, gh);
   stepSpawn(s);
   stepCrew(s, dtReal);
   stepThreats(s, dtReal);

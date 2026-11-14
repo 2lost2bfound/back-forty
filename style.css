@@ -241,6 +241,12 @@ body {
 .menu-panel.phone .menu-row { flex-wrap: wrap; }
 .phone-tabs { gap: 6px; }
 
+/* M12 kitchen and the edible rows in shop/sell panels: long rows wrap, never clip. */
+.menu-panel.kitchen .menu-body { width: 720px; overflow-x: hidden; }
+.menu-panel.kitchen .menu-row,
+.menu-panel.shop .menu-row,
+.menu-panel.sell .menu-row { flex-wrap: wrap; overflow-wrap: anywhere; }
+
 .menu-hint {
   font-size: 11px;
   color: #7d8db0;

@@ -22,6 +22,9 @@ import {
   cupOf, cupBatches, cupQualifies, enterCup, nextCupDay,
 } from '../sim/license.js';
 import {
+  RECIPE_KEYS, ed, stoveOf, startCook, collectCook, sellEdibles, unitPrice, roomToday, totalUnits, hasLicense,
+} from '../sim/edibles.js';
+import {
   boardCandidates, describe, hire, fire, giveBonus, bailOut, dockPay, threaten, toggleOutgoing, placeMarker, crewOf,
 } from '../sim/crew.js';
 
@@ -67,10 +70,12 @@ export function initMenus(hud) {
   const phonePanel = makePanel('phone');
   const noticePanel = makePanel('notice');
   const allyPanel = makePanel('ally');
+  const kitchenPanel = makePanel('kitchen');
+  let pickedBatch = null;   // the dry batch chosen in the kitchen (by identity)
 
   function closeAll() {
     open = null;
-    for (const p of [shopPanel, sellPanel, invPanel, standPanel, reportPanel, phonePanel, noticePanel, allyPanel]) {
+    for (const p of [shopPanel, sellPanel, invPanel, standPanel, reportPanel, phonePanel, noticePanel, allyPanel, kitchenPanel]) {
       p.panel.style.display = 'none';
     }
   }
@@ -156,6 +161,7 @@ export function initMenus(hud) {
     const state = stateRef;
     const def = CONFIG.economy.buyers[buyerKey];
     sellPanel.body.textContent = '';
+    renderEdibleRows(state, sellPanel.body, buyerKey, renderSell);
     const order = orderOf(state, buyerKey);
     if (!order) {
       el('div', 'menu-note', sellPanel.body, `${def.name} doesn't need anything right now.`);
@@ -250,6 +256,7 @@ export function initMenus(hud) {
           `${def.name} (${def.where} ${hrs(def.open)}-${hrs(def.close)}) trust ${buyerLevel(state, key)}/5, ${b.pts} pts${dorm}`);
       }
     } else {
+      if (hasLicense(state)) el('div', 'menu-note', phonePanel.body, `Edibles in stock: ${RECIPE_KEYS.map((k) => `${CONFIG.edibles.recipes[k].name} ${totalUnits(state, k)}`).join(', ')}`);
       if (eco.ledger.length === 0) el('div', 'menu-note', phonePanel.body, 'Nothing yet.');
       for (const e of eco.ledger.slice().reverse()) {
         el('div', 'menu-row', phonePanel.body,
@@ -475,7 +482,9 @@ export function initMenus(hud) {
     for (const g of bredGroups) {
       el('div', 'menu-note', invPanel.body, `${lineName(linesOf(state)[g.lineId])} seeds x${g.count} (F${g.filial}, stability ${Math.round(g.stability * 100)}%, Q picks what E plants)`);
     }
-    if (keys.length === 0 && cuts.length === 0 && bredGroups.length === 0) el('div', 'menu-note', invPanel.body, 'Empty.');
+    const edB = ed(state).batches;
+    for (const b of edB) el('div', 'menu-note', invPanel.body, `${CONFIG.edibles.recipes[b.product].name} x${b.units} (${b.strainName}, quality ${Math.round(b.quality)}) - licensed stock, sold at the dispensary or to trusted buyers`);
+    if (keys.length === 0 && cuts.length === 0 && bredGroups.length === 0 && edB.length === 0) el('div', 'menu-note', invPanel.body, 'Empty.');
     for (const key of keys) {
       const row = el('div', 'menu-row', invPanel.body);
       const count = key === 'nutrients' || key === 'phkit' ? `${inv[key]} doses` : inv[key];
@@ -545,6 +554,7 @@ export function initMenus(hud) {
         for (const n of [1, 10]) el('button', 'menu-btn', row, `Sell ${n}`).onclick = () => { hud.toast(sellSeedPacks(state, l.id, n).msg); renderShop(); };
       }
     }
+    if (lic(state).granted) renderEdibleRows(state, body, 'dispensary', renderShop);
     if (state.legacy) {
       const c = cupOf(state);
       el('div', 'menu-note', body, `Harvest Cup: judged day ${c.entry ? c.entry.day : nextCupDay(state)} at ${CONFIG.cup.judgeHour}:00. Win with a named strain, trait sum ${CONFIG.cup.sumMin}+, stability 100%. Cups won: ${c.wins}.`);
@@ -553,6 +563,66 @@ export function initMenus(hud) {
         const row = el('div', 'menu-row', body, `${b.strainName}: ${b.grams.toFixed(0)} g, sum ${b.sum}, stability ${Math.round(b.stab * 100)}% ${cupQualifies(b) ? '(a winner)' : '(not good enough yet)'}`);
         el('button', 'menu-btn', row, `Enter ${CONFIG.cup.grams} g`).onclick = () => { hud.toast(enterCup(state, b).msg); renderShop(); };
       }
+    }
+  }
+
+  // ------------------------------------------------- edibles (M12) ----
+
+  /** "Sell edibles" rows (1 / 10 per product) for the dispensary or a buyer. */
+  function renderEdibleRows(state, body, channel, rerender) {
+    if (!hasLicense(state) || totalUnits(state) === 0) return;
+    const X = CONFIG.edibles;
+    const buyer = channel !== 'dispensary';
+    if (buyer && buyerLevel(state, channel) < X.buyer.trust) {
+      el('div', 'menu-note', body, `Edibles: trust level ${X.buyer.trust}+ needed to sell edibles here.`);
+      return;
+    }
+    el('div', 'menu-note', body, `Sell edibles (${roomToday(state, channel)} units left today, ${buyer ? 'dirty cash, +1 heat per sale' : 'to the Bank, no heat'})`);
+    for (const k of RECIPE_KEYS) {
+      const have = ed(state).batches.filter((b) => b.product === k);
+      if (have.length === 0) continue;
+      const best = Math.max(...have.map((b) => unitPrice(state, b, channel)));
+      const row = el('div', 'menu-row', body, `${X.recipes[k].name} x${totalUnits(state, k)}: up to $${best.toFixed(2)} each`);
+      for (const n of [1, 10]) el('button', 'menu-btn', row, `Sell ${n}`).onclick = () => { hud.toast(sellEdibles(state, channel, k, n).msg); rerender(); };
+    }
+  }
+
+  function openKitchen(state) {
+    stateRef = state;
+    pickedBatch = null;
+    renderKitchen();
+    show(kitchenPanel, 'Kitchen stove', 'kitchen');
+  }
+
+  function renderKitchen() {
+    const state = stateRef;
+    const X = CONFIG.edibles;
+    const stove = stoveOf(state);
+    kitchenPanel.body.textContent = '';
+    if (!stove) { el('div', 'menu-note', kitchenPanel.body, 'No stove on the lot.'); return; }
+    const c = stove.cook;
+    if (c) {
+      const r = X.recipes[c.recipe];
+      el('div', 'menu-note', kitchenPanel.body, c.left > 0
+        ? `Cooking ${r.name}: ${c.left.toFixed(1)} of ${r.gh} game hours left (quality ${Math.round(c.quality)}).`
+        : `${r.name} are done: ${r.units} units, quality ${Math.round(c.quality)}.`);
+      if (c.left <= 0) el('button', 'menu-btn', kitchenPanel.body, 'Collect').onclick = () => { hud.toast(collectCook(state, stove).msg); renderKitchen(); };
+      return;
+    }
+    el('div', 'menu-note', kitchenPanel.body, `Cash $${Math.round(state.player.cash)} · Bank $${Math.round(state.player.bank || 0)}. Pick a dry batch from your pack, then a recipe.`);
+    const dry = state.product.filter((b) => b.where === 'inv' && !b.wet);
+    if (dry.length === 0) el('div', 'menu-note', kitchenPanel.body, 'You have no dry bud in your pack.');
+    if (!dry.includes(pickedBatch)) pickedBatch = dry[0] || null;
+    for (const b of dry) {
+      const row = el('div', 'menu-row', kitchenPanel.body, `${b === pickedBatch ? '[x]' : '[ ]'} ${b.strainName}: ${b.grams.toFixed(1)} g, quality ${Math.round(b.quality)}`);
+      el('button', 'menu-btn', row, 'Use this').onclick = () => { pickedBatch = b; renderKitchen(); };
+    }
+    for (const k of RECIPE_KEYS) {
+      const r = X.recipes[k];
+      const row = el('div', 'menu-row', kitchenPanel.body, `${r.name}: ${r.grams} g bud + $${r.cost}, ${r.gh} gh, ${r.units} units, base $${r.price} each`);
+      const btn = el('button', 'menu-btn', row, 'Start');
+      btn.disabled = !pickedBatch || pickedBatch.grams < r.grams - 1e-9;
+      btn.onclick = () => { hud.toast(startCook(state, stove, k, pickedBatch).msg); renderKitchen(); };
     }
   }
 
@@ -637,7 +707,7 @@ export function initMenus(hud) {
   }
 
   return {
-    openShop, openSell, openAlly, openInventory, openStand, openPhone, openNotice, openGameOver,
+    openShop, openSell, openAlly, openInventory, openStand, openKitchen, openPhone, openNotice, openGameOver,
     queueReport,
     closeAll,
     anyOpen: () => open !== null,

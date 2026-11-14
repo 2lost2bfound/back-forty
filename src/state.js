@@ -20,6 +20,7 @@ import { initGenetics } from './sim/genetics.js';
 import { initAddiction } from './sim/addiction.js';
 import { initAllies } from './sim/allies.js';
 import { initLicense } from './sim/license.js';
+import { initEdibles } from './sim/edibles.js';
 
 export const SAVE_PREFIX = 'backforty';
 export const slotKey = (n) => `${SAVE_PREFIX}.slot${n}`;
@@ -59,6 +60,7 @@ export function newGame(seed, { difficulty = 'standard' } = {}) {
     addiction: initAddiction(seed), // dependence, buffs, recovery, own PRNG (saved)
     allies: initAllies(seed),   // friendship, favors, hospital/jail, own PRNG (saved)
     license: initLicense(),     // front, laundering, application, rescue (saved)
+    edibles: initEdibles(),     // edible stock and daily sales caps (saved; cooks live on the stove object)
     difficulty,                 // relaxed | standard | harsh (saved)
     won: null,                  // run stats once the license is granted (saved)
     legacy: false,              // Legacy mode after the win (saved)
@@ -201,6 +203,7 @@ export function serializeState(state) {
     addiction: state.addiction,
     allies: state.allies,
     license: state.license,
+    edibles: state.edibles,
     difficulty: state.difficulty,
     won: state.won,
     legacy: state.legacy,
@@ -253,6 +256,7 @@ export function deserializeState(json) {
     addiction: o.addiction || initAddiction(o.seed),
     allies: o.allies || initAllies(o.seed),
     license: o.license || initLicense(),
+    edibles: o.edibles || initEdibles(),
     difficulty: o.difficulty || 'standard',
     won: o.won || null,
     legacy: !!o.legacy,

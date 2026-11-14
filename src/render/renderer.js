@@ -147,7 +147,7 @@ export function createRenderer(canvas) {
 
   // ------------------------------------------------- objects and plants ----
 
-  const OBJECT_SPRITES = { pot: 'obj_pot', rack: 'obj_rack', tap: 'obj_tap', barrel: 'obj_barrel', bed: 'obj_bed', skeet: 'obj_skeet' };
+  const OBJECT_SPRITES = { pot: 'obj_pot', rack: 'obj_rack', tap: 'obj_tap', barrel: 'obj_barrel', bed: 'obj_bed', skeet: 'obj_skeet', stove: 'obj_stove' };
   const plantById = (state, id) => (id ? state.plants.find((pl) => pl.id === id) || null : null);
 
   /** Objects in view: pots (with their plant), racks, fixtures, markers. */
@@ -169,7 +169,7 @@ export function createRenderer(canvas) {
       } else if (NEW_OBJECTS[o.kind]) {
         drawNewObject(o, sx, py);
       } else {
-        drawSprite(OBJECT_SPRITES[o.kind], sx, py);
+        drawSprite(o.kind === 'stove' && o.cook && o.cook.left > 0 ? 'obj_stove_on' : OBJECT_SPRITES[o.kind], sx, py);
         if (o.kind === 'rack') {
           const n = state.product.reduce((s, b) => s + (b.where === o.id ? 1 : 0), 0);
           if (n > 0) {

@@ -213,7 +213,7 @@ export const CONFIG = {
     events: {
       runnerBusted: 10, runnerSnitch: 20, patrolStop: 10,
       killCriminal: 8, killCivilian: 40, collapse: 5, rivalTip: 15, rivalTipBribed: 8, favor: -1,
-      shootOfficer: 50,
+      shootOfficer: 50, edibleSale: 1,
       gunshotLot: { per: 1, max: 8, suppressed: 0.25 },
       gunshotTown: { per: 4, max: 20, suppressed: 4 },
     },
@@ -330,6 +330,19 @@ export const CONFIG = {
     },
   },
   // The Harvest Cup (Legacy mode, plan §A11/§A14): judged every 28 days.
+  // Edibles (M12, post-license). Prices are per unit: base x (0.5 + quality/100) x channel x named bonus.
+  edibles: {
+    stovePrice: 1500,
+    recipes: {
+      brownies:  { name: 'Brownies',       grams: 7,  cost: 20, gh: 4, units: 10, price: 12 },
+      gummies:   { name: 'Gummies',        grams: 5,  cost: 15, gh: 6, units: 20, price: 5 },
+      chocolate: { name: 'Chocolate bars', grams: 10, cost: 30, gh: 3, units: 8,  price: 18 },
+    },
+    qualityBase: 0.5, qualityDiv: 100,
+    dispensary: { mult: 1.0, perDay: 40 },       // town hall, bank, no heat
+    buyer: { mult: 1.25, perDay: 10, trust: 2 }, // each revealed buyer, dirty cash, heat edibleSale
+    namedBonus: 0.15,                            // dispensary always; buyers at trust namedTrust (genetics.breeding)
+  },
   cup: { everyDays: 28, judgeHour: 12, grams: 28, sumMin: 320, stability: 1 },
 
   // Grow sim numbers (plan §A4).
@@ -424,7 +437,7 @@ export const CONFIG = {
         'moisture_meter', 'ph_meter', 'loupe', 'rack', 'neem', 'pollenkit', 'lamp_cfl', 'lamp_hps',
         'lamp_led', 'drip', 'filter', 'generator', 'wood', 'concrete_tile',
         'ladder', 'door', 'padlock', 'deadbolt', 'steeldoor', 'hatch', 'stash', 'tripwire', 'floodlight', 'camera',
-        'pickaxe', 'cart', 'bicycle', 'duffel', 'barrel_lock', 'coffee', 'bike_parts'],
+        'pickaxe', 'cart', 'bicycle', 'duffel', 'barrel_lock', 'coffee', 'bike_parts', 'stove'],
       pawn: ['bat', 'pistol22', 'pistol9', 'shotgun', 'rifle', 'ammo_22', 'ammo_9',
         'ammo_shell', 'ammo_rifle', 'scanner', 'safe', 'bandage'],
       walt: ['dog'],
@@ -626,7 +639,7 @@ export const CONFIG = {
     crank: 'Crank', blues: 'Blues', drink: 'Drink', rumor: 'Rumor', bribe: 'Bribe the deputy', ask_around: 'Ask around for buyers',
     heal: 'Full heal', vet: 'Vet', detox: 'Detox', taper: 'Taper kit (1 day)',
     lawyer: 'Lawyer retainer (1 day)', permit: 'Farm-stand permit', truce: 'Truce with Dale',
-    whiskey: 'Whiskey', beer: 'Beer', coffee: 'Coffee', bike_parts: 'Bicycle parts', flowers: 'Flowers', package: 'Package',
+    stove: 'Kitchen stove', whiskey: 'Whiskey', beer: 'Beer', coffee: 'Coffee', bike_parts: 'Bicycle parts', flowers: 'Flowers', package: 'Package',
   },
 
   // Addiction (plan §A12). Three substances plus smoking your own product.

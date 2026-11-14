@@ -44,9 +44,9 @@ export function shopOpen(time, shopKey) {
 
 /** A shop's stock in menu order: {key, name, price, service, unreg}. */
 export function shopStock(shopKey, state) {
-  return E.stock[shopKey].filter((key) => !state || ((!seedStrain(key) || strainUnlocked(state, seedStrain(key))) && (key !== 'pollenkit' || breedingUnlocked(state)))).map((key) => {
+  return E.stock[shopKey].filter((key) => !state || ((!seedStrain(key) || strainUnlocked(state, seedStrain(key))) && (key !== 'pollenkit' || breedingUnlocked(state)) && (key !== 'stove' || licensed(state)))).map((key) => {
     const unreg = shopKey === 'alley' && E.unregStock.includes(key);
-    const base = key === 'bribe' && state ? bribePrice(state) : E.prices[key];
+    const base = key === 'bribe' && state ? bribePrice(state) : key === 'stove' ? CONFIG.edibles.stovePrice : E.prices[key];
     const mult = state ? priceMult(state, shopKey, key) : 1; // June's discount / markup, Rosa's taper price (M9)
     return {
       key, name: CONFIG.itemNames[key], unreg,
@@ -56,6 +56,8 @@ export function shopStock(shopKey, state) {
     };
   });
 }
+
+const licensed = (state) => !!(state.license && state.license.granted);
 
 /** Strain key whose seeds an item key is, or null. */
 const seedStrain = (key) => Object.keys(CONFIG.strains).find((k) => CONFIG.strains[k].item === key) || null;
@@ -101,6 +103,10 @@ export function buyItem(state, key, shopKey = 'hardware') {
   if (blocked) return { ok: false, msg: blocked };
   const p = state.player;
   if (seedStrain(key) && !strainUnlocked(state, seedStrain(key))) return { ok: false, msg: 'Those seeds are not on sale yet.' };
+  if (key === 'stove') {
+    if (!licensed(state)) return { ok: false, msg: 'The kitchen stove is sold to licensed growers only.' };
+    if ((p.inv.stove || 0) > 0 || state.objects.some((o) => o.kind === 'stove')) return { ok: false, msg: 'One stove per lot.' };
+  }
   if (key === 'bribe') return bribeDeputy(state);
   if (key === 'truce') return buyTruce(state);
   if (key === 'dog' && !canBuyDog(state)) return { ok: false, msg: 'You already have a dog.' };
@@ -260,7 +266,7 @@ export function trustLevel(pts) {
 
 export const buyerLevel = (state, key) => trustLevel(state.economy.buyers[key].pts);
 
-function ledger(state, text, amount = 0, extra) {
+export function ledger(state, text, amount = 0, extra) {
   const L = state.economy.ledger;
   L.push({ day: state.time.day, hour: Math.floor(state.time.hour), text, amount, ...extra });
   while (L.length > E.ledgerMax) L.shift();

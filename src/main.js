@@ -272,6 +272,9 @@ function processEvents() {
       case 'openStand':
         menus.openStand(state);
         break;
+      case 'openKitchen':
+        menus.openKitchen(state);
+        break;
       case 'hardUse':
         tip('addiction');
         break;
