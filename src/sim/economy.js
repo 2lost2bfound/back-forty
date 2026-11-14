@@ -12,7 +12,7 @@
 import { CONFIG } from '../config.js';
 import { withStateRng } from '../rng.js';
 import { rollSeedGenome, breedingUnlocked, lineOf, namedBonus, traitSum } from './genetics.js';
-import { seedBagOf } from './plants.js';
+import { seedBagOf, maleBagOf } from './plants.js';
 import { strainUnlocked } from './mastery.js';
 import { canBuyDog, giveDog, dogHurt, healDog } from '../entities/dog.js';
 import { buyTruce } from './threats.js';
@@ -44,7 +44,7 @@ export function shopOpen(time, shopKey) {
 
 /** A shop's stock in menu order: {key, name, price, service, unreg}. */
 export function shopStock(shopKey, state) {
-  return E.stock[shopKey].filter((key) => !state || ((!seedStrain(key) || strainUnlocked(state, seedStrain(key))) && (key !== 'pollenkit' || breedingUnlocked(state)) && (key !== 'stove' || licensed(state)))).map((key) => {
+  return E.stock[shopKey].filter((key) => !state || ((!seedStrain(key) || strainUnlocked(state, seedStrain(key))) && ((key !== 'pollenkit' && !maleStrain(key)) || breedingUnlocked(state)) && (!maleStrain(key) || strainUnlocked(state, maleStrain(key))) && (key !== 'stove' || licensed(state)))).map((key) => {
     const unreg = shopKey === 'alley' && E.unregStock.includes(key);
     const base = key === 'bribe' && state ? bribePrice(state) : key === 'stove' ? CONFIG.edibles.stovePrice : E.prices[key];
     const mult = state ? priceMult(state, shopKey, key) : 1; // June's discount / markup, Rosa's taper price (M9)
@@ -61,6 +61,8 @@ const licensed = (state) => !!(state.license && state.license.granted);
 
 /** Strain key whose seeds an item key is, or null. */
 const seedStrain = (key) => Object.keys(CONFIG.strains).find((k) => CONFIG.strains[k].item === key) || null;
+/** Strain key whose guaranteed-male seeds an item key is (L6), or null. */
+const maleStrain = (key) => Object.keys(CONFIG.strains).find((k) => CONFIG.strains[k].maleItem === key) || null;
 
 export const hardwareStock = () => shopStock('hardware');
 
@@ -77,6 +79,11 @@ function grantItem(state, key, shopKey) {
     // strain's seed bag. The starter seeds are exact base-strain genomes.
     const sk = seedStrain(key);
     seedBagOf(state.player, sk).push(withStateRng(state, (rng) => rollSeedGenome(sk, rng)));
+    inv[key] = (inv[key] || 0) + 1;
+  } else if (maleStrain(key)) {
+    // Guaranteed male (plan M11 gap: shop seeds are never male, so breeding needs a first male).
+    const sk = maleStrain(key);
+    maleBagOf(state.player, sk).push(withStateRng(state, (rng) => rollSeedGenome(sk, rng)));
     inv[key] = (inv[key] || 0) + 1;
   } else if (key === 'nutrients') {
     inv.nutrients = (inv.nutrients || 0) + E.doses.nutrients;

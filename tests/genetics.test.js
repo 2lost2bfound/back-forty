@@ -563,3 +563,36 @@ test('M11: Harvest Cup: Legacy only, 320+ at stability 1.0 wins; weaker entries 
     assert.ok(w.s.events.some((e) => e.type === 'notice' && e.title === 'Harvest Cup'));
   }
 });
+
+test('male seeds: sold at L6 only; Q-planted they grow male and start a real first cross', async () => {
+  const { plantMale } = await import('../src/sim/plants.js');
+  const s = newGame(31);
+  s.time.hour = 10;
+  s.player.cash = 5000;
+  const has = (k) => shopStock('hardware', s).some((e) => e.key === k);
+  assert.equal(has('seeds_male_ditch'), false, 'hidden below L6');
+  assert.equal(buyItem(s, 'seeds_male_ditch').ok, false);
+  s.player.level = CONFIG.mastery.breedingLevel;
+  assert.equal(has('seeds_male_ditch'), true);
+  assert.equal(has('seeds_male_widow'), true, 'Widow unlocks at L5, so its males show at L6');
+  assert.equal(buyItem(s, 'seeds_male_ditch').ok, true);
+  assert.equal(s.player.inv.seeds_male_ditch, 1);
+  // Never planted automatically: auto still picks normal seeds.
+  assert.equal(plantable(s.player).male, undefined);
+  while (!s.player.seedSel?.startsWith('male:')) cycleSeedSel(s);
+  assert.deepEqual(plantable(s.player), { male: 'ditch' });
+  const [potA, potB] = s.objects.filter((o) => o.kind === 'pot');
+  const dad = plantMale(s, potA, 'ditch');
+  assert.equal(dad.sex, 'm');
+  assert.equal(s.player.inv.seeds_male_ditch, 0);
+  const mum = plantSeed(s, potB, 'ditch');
+  dad.progress = 0.7; mum.progress = 0.7;
+  s.player.inv.pollenkit = CONFIG.economy.doses.pollenkit;
+  assert.equal(collectPollen(s, dad).ok, true);
+  cullMale(s, dad);
+  assert.equal(pollinateFemale(s, mum).ok, true);
+  mum.progress = 1; mum.overHours = 0;
+  harvestPlant(s, mum);
+  assert.ok((s.player.bredSeeds || []).length >= BR.seedsBase, 'first cross gives seeds');
+  assert.equal(lineOf(s, s.player.bredSeeds[0].lineId).filial, 1);
+});

@@ -171,6 +171,23 @@ export function plantSeed(state, pot, strainKey) {
   return plant;
 }
 
+/** Queue of purchased guaranteed-male seed genomes for a strain (L6). */
+export function maleBagOf(player, strainKey) {
+  const bags = player.maleSeeds || (player.maleSeeds = {});
+  return bags[strainKey] || (bags[strainKey] = []);
+}
+
+/** Plant one guaranteed-male shop seed (only via the Q picker, never automatic). */
+export function plantMale(state, pot, strainKey) {
+  const bag = maleBagOf(state.player, strainKey);
+  const item = CONFIG.strains[strainKey].maleItem;
+  if (pot.plantId || !(state.player.inv[item] > 0) || bag.length === 0) return null;
+  const genome = bag.shift();
+  const plant = createPlant(state, pot, strainKey, genome, { sex: 'm', base: { ...genome } });
+  if (plant) { pot.plantId = plant.id; state.player.inv[item]--; } else bag.unshift(genome);
+  return plant;
+}
+
 /** Queue of purchased seed genomes for a strain (Ditch Weed keeps the M2 `seedBag`). */
 export function seedBagOf(player, strainKey) {
   if (strainKey === 'ditch') return player.seedBag;
@@ -190,6 +207,7 @@ export function plantable(player) {
   const bred = player.bredSeeds || [];
   const sel = player.seedSel || 'auto';
   if (sel.startsWith('bred:') && bred.some((sd) => bredKey(sd) === sel.slice(5))) return { bred: sel.slice(5) };
+  if (sel.startsWith('male:') && (player.inv[CONFIG.strains[sel.slice(5)]?.maleItem] || 0) > 0) return { male: sel.slice(5) };
   if (sel.startsWith('shop:') && (player.inv[CONFIG.strains[sel.slice(5)]?.item] || 0) > 0) return { strainKey: sel.slice(5) };
   if ((player.cuttings || []).length > 0) return { cutting: true };
   if (bred.length > 0) return { bred: bredKey(bred[0]) };
@@ -206,6 +224,10 @@ export function seedChoices(state) {
   for (const key of ['widow', 'blue', 'ditch']) {
     const n = p.inv[CONFIG.strains[key].item] || 0;
     if (n > 0) out.push({ sel: `shop:${key}`, label: `${CONFIG.strains[key].name} seeds x${n}` });
+  }
+  for (const key of ['widow', 'blue', 'ditch']) {
+    const n = p.inv[CONFIG.strains[key].maleItem] || 0;
+    if (n > 0) out.push({ sel: `male:${key}`, label: `${CONFIG.strains[key].name} MALE seeds x${n}` });
   }
   for (const g of seedGroups(state)) {
     out.push({ sel: `bred:${g.key}`, label: `${lineName(lineOf(state, g.lineId))} F${g.filial} seeds x${g.count} (stability ${Math.round(g.stability * 100)}%)` });

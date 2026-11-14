@@ -295,9 +295,9 @@ export const CONFIG = {
   // `item` is the inventory key of the strain's seeds; `unlock` is the plan's
   // rule: {day} or {level} (either one), {level} only for Widow Kush.
   strains: {
-    ditch: { name: 'Ditch Weed', Y: 25, P: 40, R: 80, S: 80, price: 20, item: 'seeds' },
-    blue: { name: 'Blue Haze', Y: 50, P: 60, R: 60, S: 60, item: 'seeds_blue', unlock: { day: 8, level: 3 } },
-    widow: { name: 'Widow Kush', Y: 75, P: 80, R: 40, S: 20, item: 'seeds_widow', unlock: { level: 5 } },
+    ditch: { name: 'Ditch Weed', Y: 25, P: 40, R: 80, S: 80, price: 20, item: 'seeds', maleItem: 'seeds_male_ditch' },
+    blue: { name: 'Blue Haze', Y: 50, P: 60, R: 60, S: 60, item: 'seeds_blue', maleItem: 'seeds_male_blue', unlock: { day: 8, level: 3 } },
+    widow: { name: 'Widow Kush', Y: 75, P: 80, R: 40, S: 20, item: 'seeds_widow', maleItem: 'seeds_male_widow', unlock: { level: 5 } },
   },
   // Clones (plan §A10 Clone generations) and seed variance.
   genetics: {
@@ -410,7 +410,8 @@ export const CONFIG = {
     alley:    { building: 'alley',    label: 'Moss (alley)',   open: 21, close: 4 },
     alleyGunMarkup: 0.5,                  // unregistered guns cost +50%
     prices: {
-      seeds: 20, seeds_blue: 60, seeds_widow: 150, pot: 10, soil_potting: 15, soil_living: 40,
+      seeds: 20, seeds_blue: 60, seeds_widow: 150, pot: 10,
+      seeds_male_ditch: 30, seeds_male_blue: 90, seeds_male_widow: 225, // L6: guaranteed-male seeds to start breeding soil_potting: 15, soil_living: 40,
       nutrients: 20, phkit: 10, pollenkit: 150,
       moisture_meter: 30, ph_meter: 60, loupe: 25, rack: 50,
       neem: 15, lamp_cfl: 80, lamp_hps: 300, lamp_led: 700, drip: 400,
@@ -433,7 +434,7 @@ export const CONFIG = {
     // carried (their effects arrive with the milestones that own them);
     // `unreg` marks alley guns.
     stock: {
-      hardware: ['seeds', 'seeds_blue', 'seeds_widow', 'pot', 'soil_potting', 'soil_living', 'nutrients', 'phkit',
+      hardware: ['seeds', 'seeds_blue', 'seeds_widow', 'seeds_male_ditch', 'seeds_male_blue', 'seeds_male_widow', 'pot', 'soil_potting', 'soil_living', 'nutrients', 'phkit',
         'moisture_meter', 'ph_meter', 'loupe', 'rack', 'neem', 'pollenkit', 'lamp_cfl', 'lamp_hps',
         'lamp_led', 'drip', 'filter', 'generator', 'wood', 'concrete_tile',
         'ladder', 'door', 'padlock', 'deadbolt', 'steeldoor', 'hatch', 'stash', 'tripwire', 'floodlight', 'camera',
@@ -620,6 +621,7 @@ export const CONFIG = {
   // Inventory items (display names for HUD/hotbar/menus).
   itemNames: {
     can: 'Watering can', seeds: 'Ditch Weed seeds', seeds_blue: 'Blue Haze seeds', seeds_widow: 'Widow Kush seeds', pot: 'Pot',
+    seeds_male_ditch: 'Ditch Weed male seeds', seeds_male_blue: 'Blue Haze male seeds', seeds_male_widow: 'Widow Kush male seeds',
     soil_potting: 'Potting soil', soil_living: 'Living soil',
     nutrients: 'Nutrients', phkit: 'pH kit', pollenkit: 'Pollen kit', pollen: 'Pollen',
     moisture_meter: 'Moisture meter', ph_meter: 'pH meter', loupe: 'Loupe',

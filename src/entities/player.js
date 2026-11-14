@@ -321,6 +321,8 @@ function completeAction(state, a) {
         plants.plantCutting(state, pot);
       } else if (what.bred) {
         plants.plantBred(state, pot, what.bred);
+      } else if (what.male) {
+        plants.plantMale(state, pot, what.male);
       } else {
         state.player.inv[CONFIG.strains[what.strainKey].item]--;
         plants.plantSeed(state, pot, what.strainKey);
