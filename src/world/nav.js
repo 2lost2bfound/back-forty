@@ -7,8 +7,8 @@ import { tileAt, tileInfo, inBounds } from './tiles.js';
 const COLS = CONFIG.world.cols;
 const ok = (state, x, y) => inBounds(x, y) && !tileInfo(tileAt(state.tiles, x, y)).solid;
 const solid = (state, x, y) => !inBounds(x, y) || tileInfo(tileAt(state.tiles, x, y)).solid;
-/** A 2-tall body fits and the floor below is solid. */
-const standable = (state, x, y) => ok(state, x, y) && ok(state, x, y - 1) && solid(state, x, y + 1);
+/** A 3-tall body fits and the floor below is solid. */
+const standable = (state, x, y) => ok(state, x, y) && ok(state, x, y - 1) && ok(state, x, y - 2) && solid(state, x, y + 1);
 
 /** Path of {x,y} tile cells from -> to (inclusive), or null. */
 export function findPath(state, from, to) {
@@ -30,7 +30,7 @@ export function findPath(state, from, to) {
       for (const dy of [0, -1, 1, 2, 3]) { // level, step up one, drop up to three
         const ny = cy + dy;
         if (!standable(state, nx, ny)) continue;
-        if (dy < 0 && !ok(state, cx, cy - 2)) continue;       // headroom to step up
+        if (dy < 0 && !ok(state, cx, cy - 3)) continue;       // headroom to step up
         if (dy > 0 && !ok(state, nx, cy)) continue;           // clear to fall into
         const k = ny * COLS + nx;
         if (prev.has(k)) continue;

@@ -39,6 +39,10 @@ state.altOn = false;
 
 const renderer = createRenderer(document.getElementById('game'));
 const input = initInput(document.getElementById('game'));
+// Keep the 1600x900 HUD layer on top of the letterboxed canvas at any window size.
+const fitUi = () => document.documentElement.style.setProperty('--ui-scale', Math.min(innerWidth / 1600, innerHeight / 900));
+addEventListener('resize', fitUi);
+fitUi();
 const hud = initHud();
 const menus = initMenus(hud);
 const screens = initScreens();

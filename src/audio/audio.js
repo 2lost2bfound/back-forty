@@ -34,16 +34,16 @@ export function renderSfx(def, sampleRate = A.sampleRate) {
 
 // ------------------------------------------------------------ runtime ----
 
-const rt = { ctx: null, buffers: null, voices: 0, muted: false, vol: { master: A.master, sfx: A.sfxVol, music: A.musicVol },
+const rt = { ctx: null, buffers: null, voices: 0, muted: false, musicOff: false, vol: { master: A.master, sfx: A.sfxVol, music: A.musicVol },
   bed: 'off', tension: false, timer: null, nextBeat: 0 };
 
 try {
   const saved = JSON.parse(globalThis.localStorage?.getItem(A.storageKey) || 'null');
-  if (saved) { Object.assign(rt.vol, saved.vol); rt.muted = !!saved.muted; }
+  if (saved) { Object.assign(rt.vol, saved.vol); rt.muted = !!saved.muted; rt.musicOff = !!saved.musicOff; }
 } catch { /* no storage: defaults */ }
 
 const save = () => {
-  try { globalThis.localStorage?.setItem(A.storageKey, JSON.stringify({ vol: rt.vol, muted: rt.muted })); } catch { /* ignore */ }
+  try { globalThis.localStorage?.setItem(A.storageKey, JSON.stringify({ vol: rt.vol, muted: rt.muted, musicOff: rt.musicOff })); } catch { /* ignore */ }
 };
 
 function applyVolumes() {
@@ -51,7 +51,7 @@ function applyVolumes() {
   const m = rt.muted ? 0 : rt.vol.master;
   rt.master.gain.value = m;
   rt.sfxBus.gain.value = rt.vol.sfx;
-  rt.musicBus.gain.value = rt.vol.music;
+  rt.musicBus.gain.value = rt.musicOff ? 0 : rt.vol.music;
 }
 
 /** Create the context and render every SFX buffer. Call from a user gesture. */
@@ -121,7 +121,8 @@ export function setTension(on) {
 
 export function setVolume(kind, v) { rt.vol[kind] = Math.max(0, Math.min(1, v)); applyVolumes(); save(); }
 export function setMuted(m) { rt.muted = !!m; applyVolumes(); save(); }
-export const getVolumes = () => ({ ...rt.vol, muted: rt.muted });
+export function setMusicOff(m) { rt.musicOff = !!m; applyVolumes(); save(); }
+export const getVolumes = () => ({ ...rt.vol, muted: rt.muted, musicOff: rt.musicOff });
 
 function note(bed, freq, when, dur, out) {
   const M = bed === 'tension' ? { ...A.music.tension, detuneCents: 0 } : A.music[bed];

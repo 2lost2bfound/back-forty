@@ -1,5 +1,5 @@
 /* style.css — HUD and menu styles (plan §B9). Canvas stays at its internal
-   800x450 resolution; CSS scales it x2 with crisp pixels (plan §B2). */
+   800x450 resolution; CSS scales it to fit the window with crisp pixels. */
 
 html,
 body {
@@ -17,17 +17,22 @@ body {
 }
 
 #game {
-  width: 1600px;
-  height: 900px;
+  /* Fit the window at 16:9 (any size, letterboxed); input maps through the live rect. */
+  width: min(100vw, calc(100vh * 16 / 9));
+  height: min(100vh, calc(100vw * 9 / 16));
   image-rendering: pixelated;
   image-rendering: crisp-edges;
   background: #000;
 }
 
-/* Full-screen HUD/menu root, overlaid on the canvas. */
+/* HUD/menu root: a 1600x900 layer scaled onto the canvas (main.js sets --ui-scale). */
 #ui {
   position: fixed;
-  inset: 0;
+  left: 50%;
+  top: 50%;
+  width: 1600px;
+  height: 900px;
+  transform: translate(-50%, -50%) scale(var(--ui-scale, 1));
   pointer-events: none;
   font-family: monospace;
   color: #d7e3f4;

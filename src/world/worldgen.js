@@ -22,12 +22,12 @@ import { T } from './tiles.js';
 const WALL_TILE = { wood: T.WOOD, town: T.TOWN, concrete: T.CONCRETE };
 
 /** Building template: roof row + (h-1) wall rows; door gap in the right wall,
- * two tiles tall, at the two lowest rows (player box is 22 px < 32 px). */
+ * three tiles tall, at the three lowest rows (player box is 44 px < 48 px). */
 function buildingTemplate(w, h, wallId) {
   const rows = [];
   rows.push(String.fromCharCode(wallId).repeat(w));
   for (let i = 1; i < h; i++) {
-    const isDoorRow = i >= h - 2;
+    const isDoorRow = i >= h - 3;
     const right = isDoorRow ? T.AIR : wallId; // doors in both side walls: the road runs through
     rows.push(
       String.fromCharCode(right) +
@@ -47,8 +47,9 @@ function shackTemplate() {
   const A = String.fromCharCode(T.AIR);
   return [
     W.repeat(SHACK_W),
-    ...Array.from({ length: SHACK_H - 3 }, () => W + bg.repeat(SHACK_W - 2) + W),
+    ...Array.from({ length: SHACK_H - 4 }, () => W + bg.repeat(SHACK_W - 2) + W),
     A + bg.repeat(SHACK_W - 2) + A, // doors both sides (yard on the left), upper
+    A + bg.repeat(SHACK_W - 2) + A, // middle
     A + bg.repeat(SHACK_W - 2) + A, // lower
   ];
 }

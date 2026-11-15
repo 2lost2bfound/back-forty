@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { CONFIG } from '../src/config.js';
 import {
   newGame, rleEncode, rleDecode, saveGame, loadGame, autosave, autoKey, slotKey,
-  serializeState,
+  serializeState, deserializeState,
 } from '../src/state.js';
 import { stepTime } from '../src/sim/time.js';
 import { stepPlants, plantSeed } from '../src/sim/plants.js';
@@ -58,4 +58,20 @@ test('autosave rolls across three slots', () => {
   for (let d = 1; d <= 4; d++) { s.player.cash = d; autosave(s, st); }
   const cash = (n) => loadGame(autoKey(n), st).player.cash;
   assert.deepEqual([cash(1), cash(2), cash(3)], [4, 3, 2]);
+});
+
+test('old saves (2-tile doors, 22 px player) load with 3-tile doors and a tall player', () => {
+  const state = newGame(7);
+  const COLS = CONFIG.world.cols;
+  const shack = CONFIG.world.buildings[0];
+  const dx = shack.x + shack.w - 1;
+  const top = (state.surface[dx] - 3) * COLS + dx;
+  state.tiles[top] = state.tiles[top - COLS]; // re-close the third door row, as old worlds had it
+  const feet = state.player.y + state.player.h;
+  state.player.h = 22;
+  state.player.y = feet - 22;
+  const o = deserializeState(serializeState(state));
+  assert.equal(o.tiles[top], 0, 'third door row opened');
+  assert.equal(o.player.h, CONFIG.player.h);
+  assert.equal(o.player.y + o.player.h, feet, 'feet stay put');
 });

@@ -126,7 +126,7 @@ export const CONFIG = {
   // Player (plan §B5 box, §A9 stamina table).
   player: {
     w: 12,                 // px, hitbox
-    h: 22,
+    h: 44,                 // 2 tiles + 12 px: needs 3 tiles of headroom (art is 48 px tall)
     staminaMax: 100,
     sprintStaminaDrain: 10,    // per second sprinting
     staminaRegen: 15,          // per second not sprinting
@@ -536,7 +536,7 @@ export const CONFIG = {
     koSeconds: 20,           // a knocked-out enemy crawls off after this long
     crouchHeadDrop: 10,      // px the head drops while crouched
     crouchFireGraceS: 1,     // firing breaks cover for this long
-    bodyW: 12, bodyH: 22,    // human hitbox
+    bodyW: 12, bodyH: 44,    // human hitbox (matches the player)
     pedW: 8, pedH: 14,
     shotLandTiles: 2,        // a landing shot this near a thief may scare it
     incidentGapGh: 0.5,      // shots closer than this belong to one incident

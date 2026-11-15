@@ -7,7 +7,7 @@ Reads art/v1.1/ and writes:
   assets/sprites.png       every character frame, right- and left-facing, plus a lying-down pose;
                            terrain tiles, plants, objects, vehicles, the dog, townsfolk (art/v1.1/props/)
   assets/buildings/<k>.png one facade per building, background removed
-  assets/background.jpg    the parallax sky and hills
+  assets/background.jpg    the parallax sky and hills (dusk; background_day.jpg is the midday twin)
   src/render/artdata.js    ART_RECTS {name: [x, y, w, h]} into sprites.png
 Every character cell is CELL_W x CELL_H with the feet on the bottom row and
 the head centred at x = CELL_W / 2, so the renderer anchors all of them alike.
@@ -20,7 +20,7 @@ from PIL import Image, ImageEnhance, ImageFilter
 ROOT = Path(__file__).resolve().parent.parent
 ART = ROOT / 'art' / 'v1.1'
 OUT = ROOT / 'assets'
-CELL_W, CELL_H, BODY_H = 32, 28, 24   # BODY_H = standing height in px (player sprite was 16x24)
+CELL_W, CELL_H, BODY_H = 64, 56, 48   # BODY_H = standing height in px (2x the 24 px hitbox era, to match the facade doors)
 
 # Player frames: art/v1.1/frames/grower_A.jpg, 2 rows (5 + 3 poses). Boxes are
 # hand-picked from that image; the tend box stops before the plant.
@@ -39,7 +39,8 @@ SHEETS = {
     'thief': False, 'vivian': False, 'walt': False,
 }
 # NPC walk sheets: art/v1.1/frames/<name>_walk.jpg, one row of 5 (idle + 4 walk), facing right.
-WALKERS = ('cop', 'walt', 'benny', 'june', 'rosa', 'thief', 'goon', 'saboteur')
+WALKERS = ('cop', 'walt', 'benny', 'june', 'rosa', 'thief', 'goon', 'saboteur',
+           'ped0', 'ped1', 'ped2', 'ped3', 'ped4', 'runner', 'guard', 'gardener')
 STEP = {'rosa': 12, 'cop': 10}
 TOL = {'thief': 48}   # floor shadow under the thief
 # Props (art/v1.1/props/*.jpg), read in grid order, left to right, top to bottom.
@@ -47,9 +48,13 @@ PLATFORM_PLANK = (348, 369, 684, 397)   # the plank in the platform cell of tile
 TILE_NAMES = ['dirt', 'grass', 'stone', 'bedrock', 'wood', 'platform', 'concrete', 'ladder', 'road', 'town', 'bgwall']
 OBJECT_NAMES = ['pot', 'rack', 'tap', 'barrel', 'bed', 'stove', 'stove_on', 'stash', 'safe', 'floodlight', 'camera', 'lamp']
 EQUIP_NAMES = ['tripwire', 'filter', 'generator', 'hatch', 'farmstand', 'dog', 'patrol_car', 'unmarked_car']
-EQUIP_SIZE = {'dog': (20, 12), 'patrol_car': (44, 20), 'unmarked_car': (44, 20)}   # default 16x16
+EQUIP_SIZE = {'dog': (30, 18), 'patrol_car': (88, 40), 'unmarked_car': (88, 40)}   # default 16x16
 PLANT_NAMES = ['seedling', 'veg1', 'veg2', 'flowering', 'ripe', 'over', 'dead', 'male']
-PLANT_W, PLANT_H, PLANT_GROUND_Y = 16, 32, 652   # ground line of plants.jpg
+PLANT_W, PLANT_H, PLANT_GROUND_Y = 24, 44, 652   # ground line of plants.jpg; a ripe plant is near person height
+# Drawn size of objects (bottom-centred on their tile, overhanging into the air above): scaled to 48 px people.
+OBJ_SIZE = {'pot': (16, 10), 'rack': (22, 30), 'tap': (14, 22), 'barrel': (18, 24), 'bed': (30, 16),
+            'stove': (22, 26), 'stove_on': (22, 26), 'stash': (16, 12), 'safe': (20, 24), 'floodlight': (16, 30),
+            'generator': (24, 22), 'farmstand': (32, 30)}
 TOWNSFOLK = ['ped0', 'ped1', 'ped2', 'ped3', 'runner', 'guard', 'gardener', 'ped4']
 # Building boxes (x0, y0, x1, y1) in the 1376x768 source: walls to walls, roof to ground line.
 BUILDINGS = {
@@ -245,14 +250,14 @@ def props():
 
     objs = Image.open(P / 'objects.jpg')
     for i, name in enumerate(OBJECT_NAMES):
-        out['obj_' + name] = fit(flood_cut(grid_cell(objs, 4, 3, i % 4, i // 4)), 16, 16 if name != 'pot' else 10)
+        out['obj_' + name] = fit(flood_cut(grid_cell(objs, 4, 3, i % 4, i // 4)), *OBJ_SIZE.get(name, (16, 16)))
     pot = Image.new('RGBA', (16, 16))   # pot stands on the ground, soil line ~ y 7
     pot.paste(out['obj_pot'], (0, 6))
     out['obj_pot'] = pot
 
     equip = Image.open(P / 'equipment.jpg')
     for i, name in enumerate(EQUIP_NAMES):
-        w, h = EQUIP_SIZE.get(name, (16, 16))
+        w, h = EQUIP_SIZE.get(name) or OBJ_SIZE.get(name, (16, 16))
         img = fit(flood_cut(grid_cell(equip, 4, 2, i % 4, i // 4)), w, h)
         out[name if name in EQUIP_SIZE else 'obj_' + name] = img
     for name in ('dog', 'patrol_car', 'unmarked_car'):
@@ -267,8 +272,9 @@ def props():
     return out
 
 
-def walk_frames(name):
-    """The 4 walk poses from a walk sheet, scaled to BODY_H by the tallest figure."""
+def walk_frames(name, cell=None):
+    """The 4 walk poses from a walk sheet, scaled to BODY_H by the tallest figure
+    (or, with cell=(w, h), all scaled alike to fit a w x h cell, bottom-centre)."""
     img = flood_cut(Image.open(ART / 'frames' / f'{name}_walk.jpg'), tol=12, keep_all=True)   # flat backdrop close to the clothes
     w, h = img.size
     bg = Image.open(ART / 'frames' / f'{name}_walk.jpg').convert('RGB').getpixel((2, 2))
@@ -304,8 +310,19 @@ def walk_frames(name):
     cuts += [min(w, heads[-1] + span)]
     figs = [img.crop((x0, 0, x1, h)) for x0, x1 in zip(cuts, cuts[1:])]
     figs = [f.crop(largest_blob(f).getbbox()) for f in figs]   # trim to the body, not stray specks
-    scale = BODY_H / max(f.height for f in figs[1:])   # the idle pose can be off-angle or carry junk
-    return [to_cell(f, scale) for f in figs[1:]]
+    figs = figs[1:]   # the idle pose can be off-angle or carry junk
+    if cell:
+        cw, ch = cell
+        k = min(cw / max(f.width for f in figs), ch / max(f.height for f in figs))
+        out = []
+        for f in figs:
+            f = harden(f.resize((max(1, round(f.width * k)), max(1, round(f.height * k))), Image.LANCZOS))
+            c = Image.new('RGBA', (cw, ch))
+            c.paste(f, ((cw - f.width) // 2, ch - f.height), f)
+            out.append(c)
+        return out
+    scale = BODY_H / max(f.height for f in figs)
+    return [to_cell(f, scale) for f in figs]
 
 
 def main():
@@ -323,6 +340,8 @@ def main():
     for name in WALKERS:
         for i, c in enumerate(walk_frames(name)):
             cells[f'{name}_walk{i}'] = c
+    for i, c in enumerate(walk_frames('dog', EQUIP_SIZE['dog'])):
+        cells[f'dog_walk{i}'] = c
 
     frames = {}
     for name, c in cells.items():
@@ -332,7 +351,7 @@ def main():
         frames[name + '_down'] = cells[name].crop(cells[name].getbbox()).rotate(90, expand=True)
 
     frames.update(props())
-    size, rects, x, y, row_h = 512, {}, 0, 0, 0
+    size, rects, x, y, row_h = 1024, {}, 0, 0, 0
     atlas = Image.new('RGBA', (size, 2 * size))
     for name, f in frames.items():
         if x + f.width > size:
@@ -345,7 +364,8 @@ def main():
     OUT.mkdir(exist_ok=True)
     atlas.crop((0, 0, size, y + row_h)).save(OUT / 'sprites.png')
 
-    Image.open(ART / 'props' / 'background.jpg').save(OUT / 'background.jpg', quality=90)   # sky + hills backdrop
+    Image.open(ART / 'props' / 'background.jpg').save(OUT / 'background.jpg', quality=90)   # sky + hills backdrop (dusk)
+    Image.open(ART / 'props' / 'background_day.jpg').save(OUT / 'background_day.jpg', quality=90)   # same scene at midday
     (OUT / 'buildings').mkdir(exist_ok=True)
     for key, box in BUILDINGS.items():
         facade(Image.open(ART / 'buildings' / f'{key}.jpg'), box).save(OUT / 'buildings' / f'{key}.png')

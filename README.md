@@ -4,7 +4,7 @@ A 2D side-view sandbox about running an illegal cannabis grow and going legit.
 Raw Canvas 2D + vanilla JavaScript ES modules — zero runtime dependencies, no
 build step. See `plan.md` for the full design and build plan.
 
-**Status: Milestone M1 — world, movement, digging.**
+**Status: v1.1 — all milestones (M0–M12) built; hand-directed pixel art in progress.**
 
 ## Run
 
@@ -15,7 +15,7 @@ python3 -m http.server 8000
 ```
 
 Then open `http://localhost:8000` in Chrome. The game renders at an internal
-800×450 and is CSS-scaled ×2 to 1600×900 with crisp pixels.
+800×450 and is CSS-scaled to fit the window at 16:9 with crisp pixels.
 
 ## Test
 

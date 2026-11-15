@@ -11,6 +11,8 @@
 import { CONFIG } from './config.js';
 import { createRng } from './rng.js';
 import { generateWorld } from './world/worldgen.js';
+import { T } from './world/tiles.js';
+import { boxHitsSolid } from './world/physics.js';
 import { createPlayer, combatFields } from './entities/player.js';
 import { initEconomy } from './sim/economy.js';
 import { initHeatState } from './sim/heat.js';
@@ -233,6 +235,7 @@ export function deserializeState(json) {
     o.player.arrests = o.player.arrests || 0; o.player.debt = o.player.debt || 0;
     if (o.player.hp === undefined) Object.assign(o.player, combatFields());
   }
+  if (o.player && o.player.h !== CONFIG.player.h) growToTallBodies(o, tiles);
   return {
     version: CONFIG.version,
     seed: o.seed,
@@ -274,6 +277,29 @@ export function deserializeState(json) {
     dirtyChunks: new Set(),
     events: [],
   };
+}
+
+/**
+ * Saves from before the 48 px art had 2-tile doors and a 22 px player: open
+ * the third door row in every building side wall and regrow the player from
+ * the feet up. shortcut: a player saved inside a 2-tall tunnel is moved to
+ * the surface above; good enough for old saves.
+ */
+function growToTallBodies(o, tiles) {
+  const COLS = CONFIG.world.cols;
+  const TS = CONFIG.world.tile;
+  const walls = new Set([T.WOOD, T.TOWN, T.CONCRETE]);
+  for (const b of CONFIG.world.buildings) {
+    for (const x of [b.x, b.x + b.w - 1]) {
+      const y = o.surface[x] - 3;
+      if (walls.has(tiles[y * COLS + x]) && tiles[(y + 1) * COLS + x] === T.AIR) tiles[y * COLS + x] = T.AIR;
+    }
+  }
+  const p = o.player;
+  p.y += p.h - CONFIG.player.h;
+  p.w = CONFIG.player.w;
+  p.h = CONFIG.player.h;
+  if (boxHitsSolid(tiles, p.x, p.y, p.w, p.h)) p.y = o.surface[Math.floor((p.x + p.w / 2) / TS)] * TS - p.h;
 }
 
 /**

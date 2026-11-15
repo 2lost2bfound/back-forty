@@ -102,11 +102,12 @@ test('shack and town buildings are stamped and walkable-in', () => {
   for (let x = shack.x; x < shack.x + shack.w; x++) {
     assert.equal(tileAt(grid, x, surfaceRowOf(grid, x) - shack.h), T.WOOD, `roof at ${x}`);
   }
-  // door gap: air in the right wall, two tiles above the ground
+  // door gap: air in the right wall, three tiles above the ground
   const doorX = shack.x + shack.w - 1;
   const gy = groundRow(grid, doorX);
   assert.equal(tileAt(grid, doorX, gy - 1), T.AIR);
   assert.equal(tileAt(grid, doorX, gy - 2), T.AIR);
+  assert.equal(tileAt(grid, doorX, gy - 3), T.AIR);
   // interior is background wall (non-solid), so the player can stand inside
   const insideX = shack.x + 2;
   const igy = groundRow(grid, insideX);
@@ -114,7 +115,7 @@ test('shack and town buildings are stamped and walkable-in', () => {
   assert.ok(!isSolid(tileAt(grid, insideX, igy - 1)));
   // town building walls use town-solid
   const hw = CONFIG.world.buildings[2]; // hardware at 236
-  assert.equal(tileAt(grid, hw.x, groundRow(grid, hw.x) - 3), T.TOWN); // above the door gap
+  assert.equal(tileAt(grid, hw.x, groundRow(grid, hw.x) - 4), T.TOWN); // above the door gap
 });
 
 function surfaceRowOf(grid, x) {
@@ -301,10 +302,11 @@ test('ladders are climbable and pass-through', () => {
   const grid = state.tiles;
   const lx = 300;
   for (let y = 20; y <= 29; y++) grid[y * COLS + lx] = T.LADDER;
-  assert.ok(!boxHitsSolid(grid, lx * TS, 25 * TS, 12, 22));
-  assert.ok(boxOverlapsId(grid, { x: lx * TS, y: 25 * TS, w: 12, h: 22 }, T.LADDER));
+  const PH = CONFIG.player.h;
+  assert.ok(!boxHitsSolid(grid, lx * TS, 25 * TS, 12, PH));
+  assert.ok(boxOverlapsId(grid, { x: lx * TS, y: 25 * TS, w: 12, h: PH }, T.LADDER));
 
-  const p = placeAt(state, lx * TS + 2, 29 * TS - 22);
+  const p = placeAt(state, lx * TS + 2, 29 * TS - PH);
   const startY = p.y;
   let y = startY;
   for (let i = 0; i < 60; i++) {

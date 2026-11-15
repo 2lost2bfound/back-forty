@@ -19,6 +19,7 @@ import { isRaining } from '../sim/time.js';
 import { hs } from '../sim/heat.js';
 import { stageOf, stressorsOf } from '../sim/plants.js';
 import { presentBuyers } from '../entities/npc.js';
+import { spotsNow } from '../sim/allies.js';
 
 const W = CONFIG.canvas.width;
 const H = CONFIG.canvas.height;
@@ -37,11 +38,20 @@ const ALLY_COLORS = { walt: '#7a8a4a', benny: '#c47a2a', june: '#c44a8a', rosa: 
 const loadImg = (src) => Object.assign(new Image(), { src });
 const ART_SHEET = loadImg('assets/sprites.png');
 const BACKDROP = loadImg('assets/background.jpg');
+const BACKDROP_DAY = loadImg('assets/background_day.jpg');
 const FACADES = Object.fromEntries(CONFIG.world.buildings.map((b) => [b.key, loadImg(`assets/buildings/${b.key}.png`)]));
 const ready = (img) => img.complete && img.naturalWidth > 0;
 const BUYER_ART = { skeet: 'skeet', marla: 'marla', doc: 'doc_renner', tone: 'big_tone', vivian: 'vivian' };
 const PED_ART = ['ped0', 'ped1', 'ped2', 'ped3', 'ped4'];
 const entityArt =(e) => (e.kind === 'ally' ? e.ally : e.biker ? 'goon' : e.kind);
+
+/** 0 at night and dusk, 1 at midday: 6:00-9:00 ramps up, 16:00-19:00 ramps down. */
+export function dayWeight(hour) {
+  if (hour < 6 || hour >= 19) return 0;
+  if (hour < 9) return (hour - 6) / 3;
+  if (hour < 16) return 1;
+  return (19 - hour) / 3;
+}
 
 export function createRenderer(canvas) {
   const ctx = canvas.getContext('2d');
@@ -126,25 +136,41 @@ export function createRenderer(canvas) {
 
   // Art backdrop: scaled once to the screen height, tiled sideways at the hills'
   // parallax rate, bottom on the surface line; its top colour fills the sky above.
-  let bg = null;
-  function drawBackdrop() {
-    if (!bg) {
-      if (!ready(BACKDROP)) return false;
-      bg = document.createElement('canvas');
-      bg.height = H;
-      bg.width = Math.round(H * BACKDROP.naturalWidth / BACKDROP.naturalHeight);
-      const g = bg.getContext('2d');
-      g.imageSmoothingQuality = 'high';
-      g.drawImage(BACKDROP, 0, 0, bg.width, bg.height);
-      const p = g.getImageData(0, 0, 1, 1).data;
-      bg.sky = `rgb(${p[0]},${p[1]},${p[2]})`;
-    }
+  // The midday twin fades in over the dusk one through the morning and out in the evening.
+  const backdrops = new Map();
+  function backdropCanvas(img) {
+    if (backdrops.has(img)) return backdrops.get(img);
+    if (!ready(img)) return null;
+    const bg = document.createElement('canvas');
+    bg.height = H;
+    bg.width = Math.round(H * img.naturalWidth / img.naturalHeight);
+    const g = bg.getContext('2d');
+    g.imageSmoothingQuality = 'high';
+    g.drawImage(img, 0, 0, bg.width, bg.height);
+    const p = g.getImageData(0, 0, 1, 1).data;
+    bg.sky = `rgb(${p[0]},${p[1]},${p[2]})`;
+    backdrops.set(img, bg);
+    return bg;
+  }
+  function paintBackdrop(bg) {
     const by = CONFIG.world.surfaceRow * TS - Math.round(bg.height * 0.7) - cam.ry; // dark bottom 30% sits behind the ground
     ctx.fillStyle = bg.sky;
     ctx.fillRect(0, 0, W, Math.max(0, by + 1));
-    if (by > H) return true;
+    if (by > H) return;
     const bx = -Math.floor((cam.rx * CONFIG.render.hills.scroll) % bg.width);
     for (let x = bx; x < W; x += bg.width) ctx.drawImage(bg, x, by);
+  }
+  function drawBackdrop(state) {
+    const dusk = backdropCanvas(BACKDROP);
+    if (!dusk) return false;
+    paintBackdrop(dusk);
+    const day = backdropCanvas(BACKDROP_DAY);
+    const k = day ? dayWeight(state.time.hour) : 0;
+    if (k > 0) {
+      ctx.globalAlpha = k;
+      paintBackdrop(day);
+      ctx.globalAlpha = 1;
+    }
     return true;
   }
 
@@ -173,7 +199,7 @@ export function createRenderer(canvas) {
   function playerFrameName(p) {
     if (p.action || p.dig.cx >= 0) return 'tend';
     if (!p.onGround && !p.onLadder) return 'jump';
-    if (Math.abs(p.vx) > 1 && p.onGround) return 'walk' + (Math.floor(p.walkDist / 10) % 4);
+    if (Math.abs(p.vx) > 1 && p.onGround) return 'walk' + (Math.floor(p.walkDist / 20) % 4);
     return 'idle';
   }
 
@@ -197,11 +223,11 @@ export function createRenderer(canvas) {
     return f;
   }
 
-  /** NPC art name: a walk frame (every 10 px walked, like the grower) while moving, if the sheet has one. */
+  /** NPC art name: a walk frame (every 20 px walked, like the grower) while moving, if the sheet has one. */
   function walkArt(base, obj, x) {
     const f = facing(obj, x);
     const s = lastX.get(obj);
-    const walk = `${base}_walk${Math.floor(s.d / 10) % 4}`;
+    const walk = `${base}_walk${Math.floor(s.d / 20) % 4}`;
     return (s.moving && ART_RECTS[walk] ? walk : base) + f;
   }
 
@@ -269,13 +295,15 @@ export function createRenderer(canvas) {
         drawSprite('obj_pot', sx, py);
         const plant = plantById(state, o.plantId);
         if (plant) {
-          // 16x32 with the base on the soil: ~12px into the old pot cell, ~8px into the art pot.
-          drawSprite('plant_' + plantFrameName(plant), sx, py + (ready(ART_SHEET) ? 8 : 12) - PLANT_H);
+          // Base on the soil: ~12px into the old pot cell, ~8px into the art pot.
+          const pn = 'plant_' + plantFrameName(plant);
+          if (!drawArt(pn, sx + TS / 2, py + 8)) drawSprite(pn, sx, py + 12 - PLANT_H);
         }
       } else if (NEW_OBJECTS[o.kind]) {
         drawNewObject(o, sx, py);
       } else {
-        drawSprite(o.kind === 'stove' && o.cook && o.cook.left > 0 ? 'obj_stove_on' : OBJECT_SPRITES[o.kind], sx, py);
+        const on = o.kind === 'stove' && o.cook && o.cook.left > 0 ? 'obj_stove_on' : OBJECT_SPRITES[o.kind];
+        if (!drawArt(on, sx + TS / 2, py + TS)) drawSprite(on, sx, py); // art is taller than its tile, feet on the tile floor
         if (o.kind === 'rack') {
           const n = state.product.reduce((s, b) => s + (b.where === o.id ? 1 : 0), 0);
           if (n > 0) {
@@ -294,13 +322,14 @@ export function createRenderer(canvas) {
     generator: '#c9632b', hatch: 'rgba(40,28,16,0.9)', farmstand: '#d9b44a',
   };
   function drawNewObject(o, sx, py) {
-    if (ready(ART_SHEET) && ART_RECTS['obj_' + o.kind]) return drawSprite('obj_' + o.kind, sx, py);
+    if (drawArt('obj_' + o.kind, sx + TS / 2, py + TS)) return;
     ctx.fillStyle = NEW_OBJECTS[o.kind];
     if (o.kind === 'lamp') ctx.fillRect(sx + 5, py + 2, 6, 4);
     else if (o.kind === 'hatch') ctx.fillRect(sx + 1, py + 7, TS - 2, 2);
     else ctx.fillRect(sx + 2, py + 5, TS - 4, TS - 5);
   }
 
+  const raidCops = []; // stable keys so each raid cop keeps its own walk phase
   /** Cops, the patrol car and the unmarked car (M4 world tells). */
   function drawPolice(state) {
     const ground = state.surface[CONFIG.world.zones.roadX0 + 5] * TS - cam.ry;
@@ -318,9 +347,13 @@ export function createRenderer(canvas) {
     if (raid && raid.path.length > 0) {
       const k = Math.min(1, raid.t / CONFIG.heat.raid.arriveGh) * (raid.path.length - 1);
       const [tx, ty] = raid.path[Math.floor(k)];
+      const [nx] = raid.path[Math.min(raid.path.length - 1, Math.floor(k) + 1)];
+      const px = (tx + (nx - tx) * (k % 1)) * TS; // slide between path tiles so the walk cycle advances smoothly
+      raidCops.length = raid.cops;
       for (let i = 0; i < raid.cops; i++) {
-        const x = tx * TS + i * 5 - cam.rx;
-        if (!drawArt('cop', x + 2, (ty + 1) * TS - cam.ry)) ctx.fillRect(Math.round(x), Math.round(ty * TS - 6 - cam.ry), 5, 22);
+        const me = raidCops[i] || (raidCops[i] = {});
+        const x = px + i * 5 - cam.rx;
+        if (!drawArt(walkArt('cop', me, px + i * 5), x + 2, (ty + 1) * TS - cam.ry)) ctx.fillRect(Math.round(x), Math.round(ty * TS - 6 - cam.ry), 5, 22);
       }
     }
   }
@@ -346,7 +379,7 @@ export function createRenderer(canvas) {
       const sx = Math.round(m.x - cam.rx);
       if (sx < -16 || sx > W) continue;
       const feet = Math.round((m.role === 'gardener' ? m.y + TS : state.surface[Math.max(0, Math.min(399, (m.x / TS) | 0))] * TS) - cam.ry);
-      if (drawArt(m.role + facing(m, m.x), sx, feet)) continue;
+      if (drawArt(walkArt(m.role, m, m.x), sx, feet)) continue;
       ctx.fillStyle = colors[m.role];
       ctx.fillRect(sx - 6, feet - 22, 12, 22);
     }
@@ -354,7 +387,7 @@ export function createRenderer(canvas) {
     if (dog) {
       const sx = Math.round(dog.x - cam.rx);
       const feet = Math.round(state.surface[(dog.x / TS) | 0] * TS - cam.ry);
-      if (!drawArt(dog.hp > 0 ? 'dog' + facing(dog, dog.x) : 'dog_down', sx, feet)) {
+      if (!drawArt(dog.hp > 0 ? walkArt('dog', dog, dog.x) : 'dog_down', sx, feet)) {
         ctx.fillStyle = dog.hp > 0 ? '#9a6b3a' : '#6b6b6b';
         ctx.fillRect(sx - 7, feet - 9, 14, 9);
       }
@@ -364,8 +397,8 @@ export function createRenderer(canvas) {
   }
 
   function drawCar(sx, ground, color, lights, art) {
-    if (sx < -40 || sx > W) return;
-    if (drawArt(art, sx + 16, ground)) return; // art is 44 wide, centred on the old 32 px body
+    if (sx < -80 || sx > W + 40) return;
+    if (drawArt(art, sx + 16, ground)) return; // art is 88 wide, centred on the old 32 px body
     ctx.fillStyle = color;
     ctx.fillRect(Math.round(sx), Math.round(ground - 12), 32, 10);
     ctx.fillRect(Math.round(sx + 8), Math.round(ground - 18), 16, 6);
@@ -378,12 +411,14 @@ export function createRenderer(canvas) {
       if (drawArt(BUYER_ART[b.key], b.x * TS + TS / 2 - cam.rx, state.surface[b.x] * TS - cam.ry)) continue;
       drawSprite('obj_skeet', b.x * TS - cam.rx, (state.surface[b.x] - 1) * TS - cam.ry);
     }
+    // Allies waiting at their spot (the talk prompt targets them there).
+    for (const al of spotsNow(state)) drawArt(al.id, al.x * TS + TS / 2 - cam.rx, state.surface[al.x] * TS - cam.ry);
     ctx.fillStyle = '#8a7fa8';
     state.npcs.forEach((n, i) => {
       const sx = Math.round(n.x - cam.rx);
       if (sx < -8 || sx > W) return;
       const feet = state.surface[(n.x / TS) | 0] * TS - cam.ry;
-      if (drawArt(PED_ART[(n.id ?? i) % PED_ART.length] + facing(n, n.x), sx, feet)) return;
+      if (drawArt(walkArt(PED_ART[(n.id ?? i) % PED_ART.length], n, n.x), sx, feet)) return;
       ctx.fillRect(sx - 3, Math.round(feet - 14), 6, 14);
     });
   }
@@ -466,7 +501,7 @@ export function createRenderer(canvas) {
       if (!chunksRendered) renderAllChunks(state); // boot: paint the world once
       updateCamera(state, dt);
       flushDirtyChunks(state);
-      if (!drawBackdrop()) {
+      if (!drawBackdrop(state)) {
         ctx.drawImage(sky, 0, 0, 1, H, 0, 0, W, H); // 1px gradient stretched
         drawHills();
       }

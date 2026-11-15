@@ -142,6 +142,10 @@ export function initScreens() {
     const mute = el('input', '', mr);
     mute.type = 'checkbox'; mute.checked = vols.muted;
     mute.onchange = () => audio.setMuted(mute.checked);
+    const mo = el('div', 'menu-row', body, 'Mute music ');
+    const musicOff = el('input', '', mo);
+    musicOff.type = 'checkbox'; musicOff.checked = vols.musicOff;
+    musicOff.onchange = () => audio.setMusicOff(musicOff.checked);
     const tr = el('div', 'menu-row', body, 'First-time tips ');
     const tips = el('input', '', tr);
     tips.type = 'checkbox'; tips.checked = settings.tips;
