@@ -12,6 +12,7 @@ import { CONFIG } from '../config.js';
 import { buildAtlas } from './sprites.js';
 import { tileInfo, getTile } from '../world/tiles.js';
 import { plantFrameName, PLANT_H } from './spritedata.js';
+import { ART_RECTS } from './artdata.js';
 import { createLighting } from './lighting.js';
 import { drawRain } from './particles.js';
 import { isRaining } from '../sim/time.js';
@@ -30,6 +31,17 @@ const WORLD_PX_W = CONFIG.world.cols * TS;
 const WORLD_PX_H = CONFIG.world.rows * TS;
 
 const ALLY_COLORS = { walt: '#7a8a4a', benny: '#c47a2a', june: '#c44a8a', rosa: '#f0f0f0' }; // M9 allies
+
+// v1.1 art (tools/extract_art.py). Images load async; until they do (or if a
+// name has no art) the old procedural shapes draw instead.
+const loadImg = (src) => Object.assign(new Image(), { src });
+const ART_SHEET = loadImg('assets/sprites.png');
+const BACKDROP = loadImg('assets/background.jpg');
+const FACADES = Object.fromEntries(CONFIG.world.buildings.map((b) => [b.key, loadImg(`assets/buildings/${b.key}.png`)]));
+const ready = (img) => img.complete && img.naturalWidth > 0;
+const BUYER_ART = { skeet: 'skeet', marla: 'marla', doc: 'doc_renner', tone: 'big_tone', vivian: 'vivian' };
+const PED_ART = ['ped0', 'ped1', 'ped2', 'ped3', 'ped4'];
+const entityArt =(e) => (e.kind === 'ally' ? e.ally : e.biker ? 'goon' : e.kind);
 
 export function createRenderer(canvas) {
   const ctx = canvas.getContext('2d');
@@ -54,6 +66,7 @@ export function createRenderer(canvas) {
     chunkCtxs[i] = cc;
   }
   let chunksRendered = false;
+  ART_SHEET.addEventListener('load', () => { chunksRendered = false; }); // repaint tiles with the art
 
   // Camera floats (lerped) and rounded draw position. Exposed so main.js can
   // convert mouse aim to world coordinates.
@@ -73,8 +86,13 @@ export function createRenderer(canvas) {
         if (wx >= CONFIG.world.cols) break;
         const id = state.tiles[base + tx];
         if (!id) continue;
-        const r = atlas.rects['tile_' + tileInfo(id).name];
-        if (r) cc.drawImage(atlas.canvas, r[0], r[1], r[2], r[3], tx * TS, ty * TS, TS, TS);
+        const name = 'tile_' + tileInfo(id).name;
+        const ar = ready(ART_SHEET) && ART_RECTS[name];
+        if (ar) cc.drawImage(ART_SHEET, ar[0], ar[1], ar[2], ar[3], tx * TS, ty * TS, TS, TS);
+        else {
+          const r = atlas.rects[name];
+          if (r) cc.drawImage(atlas.canvas, r[0], r[1], r[2], r[3], tx * TS, ty * TS, TS, TS);
+        }
       }
     }
   }
@@ -106,6 +124,30 @@ export function createRenderer(canvas) {
     cam.ry = Math.round(cam.y);
   }
 
+  // Art backdrop: scaled once to the screen height, tiled sideways at the hills'
+  // parallax rate, bottom on the surface line; its top colour fills the sky above.
+  let bg = null;
+  function drawBackdrop() {
+    if (!bg) {
+      if (!ready(BACKDROP)) return false;
+      bg = document.createElement('canvas');
+      bg.height = H;
+      bg.width = Math.round(H * BACKDROP.naturalWidth / BACKDROP.naturalHeight);
+      const g = bg.getContext('2d');
+      g.imageSmoothingQuality = 'high';
+      g.drawImage(BACKDROP, 0, 0, bg.width, bg.height);
+      const p = g.getImageData(0, 0, 1, 1).data;
+      bg.sky = `rgb(${p[0]},${p[1]},${p[2]})`;
+    }
+    const by = CONFIG.world.surfaceRow * TS - Math.round(bg.height * 0.7) - cam.ry; // dark bottom 30% sits behind the ground
+    ctx.fillStyle = bg.sky;
+    ctx.fillRect(0, 0, W, Math.max(0, by + 1));
+    if (by > H) return true;
+    const bx = -Math.floor((cam.rx * CONFIG.render.hills.scroll) % bg.width);
+    for (let x = bx; x < W; x += bg.width) ctx.drawImage(bg, x, by);
+    return true;
+  }
+
   function drawHills() {
     const hh = CONFIG.render.hills.h;
     const hy = CONFIG.world.surfaceRow * TS - hh - cam.ry;
@@ -135,10 +177,74 @@ export function createRenderer(canvas) {
     return 'idle';
   }
 
+  /** Draw an art frame centred on cx with its bottom at feetY. False = no art yet. */
+  function drawArt(name, cx, feetY) {
+    const r = ART_RECTS[name];
+    if (!r || !ready(ART_SHEET)) return false;
+    const sx = Math.round(cx - r[2] / 2);
+    const sy = Math.round(feetY - r[3]);
+    if (sx > -r[2] && sx < W && sy > -r[3] && sy < H) ctx.drawImage(ART_SHEET, r[0], r[1], r[2], r[3], sx, sy, r[2], r[3]);
+    return true;
+  }
+
+  // Facing for NPCs, from their movement between frames ('' right, 'L' left).
+  const lastX = new WeakMap();
+  function facing(obj, x) {
+    const prev = lastX.get(obj) || { x, f: '', d: 0 };
+    const dx = Math.abs(x - prev.x);
+    const f = dx > 0.05 ? (x < prev.x ? 'L' : '') : prev.f;
+    lastX.set(obj, { x, f, d: prev.d + dx, moving: dx > 0.05 });
+    return f;
+  }
+
+  /** NPC art name: a walk frame (every 10 px walked, like the grower) while moving, if the sheet has one. */
+  function walkArt(base, obj, x) {
+    const f = facing(obj, x);
+    const s = lastX.get(obj);
+    const walk = `${base}_walk${Math.floor(s.d / 10) % 4}`;
+    return (s.moving && ART_RECTS[walk] ? walk : base) + f;
+  }
+
+  // Facade art is ~1000 px wide: scale it once, smoothed, to the footprint width.
+  const facadeCache = {};
+  function facadeCanvas(b) {
+    if (facadeCache[b.key]) return facadeCache[b.key];
+    const img = FACADES[b.key];
+    if (!ready(img)) return null;
+    const c = document.createElement('canvas');
+    c.width = b.w * TS;
+    c.height = Math.round(c.width * img.naturalHeight / img.naturalWidth);
+    const g = c.getContext('2d');
+    g.imageSmoothingQuality = 'high';
+    g.drawImage(img, 0, 0, c.width, c.height);
+    return (facadeCache[b.key] = c);
+  }
+
+  /** Building facades over their tile footprint, faded while the player is inside. */
+  function drawBuildings(state) {
+    const p = state.player;
+    const pcx = p.x + p.w / 2;
+    for (const b of CONFIG.world.buildings) {
+      const img = facadeCanvas(b);
+      if (!img) continue;
+      const w = img.width;
+      const h = img.height;
+      const ground = state.surface[b.x] * TS;
+      const sx = b.x * TS - cam.rx;
+      const sy = ground - h - cam.ry;
+      if (sx > W || sx + w < 0 || sy > H || sy + h < 0) continue;
+      const inside = pcx > b.x * TS && pcx < b.x * TS + w && p.y + p.h > ground - b.h * TS && p.y < ground;
+      if (inside) ctx.globalAlpha = 0.2;
+      ctx.drawImage(img, sx, sy, w, h);
+      ctx.globalAlpha = 1;
+    }
+  }
+
   function drawPlayer(state) {
     const p = state.player;
     let name = playerFrameName(p);
     if (p.facing < 0) name += 'L';
+    if (drawArt('grower_' + name, p.x + p.w / 2 - cam.rx, p.y + p.h - cam.ry)) return;
     const r = atlas.rects['player_' + name] || atlas.rects['player_idle'];
     const sx = Math.round(p.x + p.w / 2 - PLAYER_HW - cam.rx);
     const sy = Math.round(p.y + p.h - PLAYER_HH - cam.ry);
@@ -163,8 +269,8 @@ export function createRenderer(canvas) {
         drawSprite('obj_pot', sx, py);
         const plant = plantById(state, o.plantId);
         if (plant) {
-          // 16x32 with the base ~12px into the pot cell.
-          drawSprite('plant_' + plantFrameName(plant), sx, py + 12 - PLANT_H);
+          // 16x32 with the base on the soil: ~12px into the old pot cell, ~8px into the art pot.
+          drawSprite('plant_' + plantFrameName(plant), sx, py + (ready(ART_SHEET) ? 8 : 12) - PLANT_H);
         }
       } else if (NEW_OBJECTS[o.kind]) {
         drawNewObject(o, sx, py);
@@ -188,6 +294,7 @@ export function createRenderer(canvas) {
     generator: '#c9632b', hatch: 'rgba(40,28,16,0.9)', farmstand: '#d9b44a',
   };
   function drawNewObject(o, sx, py) {
+    if (ready(ART_SHEET) && ART_RECTS['obj_' + o.kind]) return drawSprite('obj_' + o.kind, sx, py);
     ctx.fillStyle = NEW_OBJECTS[o.kind];
     if (o.kind === 'lamp') ctx.fillRect(sx + 5, py + 2, 6, 4);
     else if (o.kind === 'hatch') ctx.fillRect(sx + 1, py + 7, TS - 2, 2);
@@ -198,20 +305,22 @@ export function createRenderer(canvas) {
   function drawPolice(state) {
     const ground = state.surface[CONFIG.world.zones.roadX0 + 5] * TS - cam.ry;
     const T = CONFIG.heat.tells;
-    if (state.tells && state.tells.unmarkedCar) drawCar(T.unmarkedCarX * TS - cam.rx, ground, '#2a2d33');
-    if (state.patrolCar) drawCar(state.patrolCar.x - cam.rx, ground, '#e8edf5', true);
+    if (state.tells && state.tells.unmarkedCar) drawCar(T.unmarkedCarX * TS - cam.rx, ground, '#2a2d33', false, 'unmarked_car');
+    if (state.patrolCar) drawCar(state.patrolCar.x - cam.rx, ground, '#e8edf5', true, 'patrol_car' + facing(state.patrolCar, state.patrolCar.x));
     ctx.fillStyle = '#2f5fb8';
     for (const c of state.cops || []) {
       const sx = Math.round(c.x - cam.rx);
       if (sx < -8 || sx > W) continue;
-      ctx.fillRect(sx - 3, Math.round(state.surface[(c.x / TS) | 0] * TS - 14 - cam.ry), 6, 14);
+      const feet = state.surface[(c.x / TS) | 0] * TS - cam.ry;
+      if (!drawArt(walkArt('cop', c, c.x), sx, feet)) ctx.fillRect(sx - 3, Math.round(feet - 14), 6, 14);
     }
     const raid = hs(state).raid;
     if (raid && raid.path.length > 0) {
       const k = Math.min(1, raid.t / CONFIG.heat.raid.arriveGh) * (raid.path.length - 1);
       const [tx, ty] = raid.path[Math.floor(k)];
       for (let i = 0; i < raid.cops; i++) {
-        ctx.fillRect(Math.round(tx * TS + i * 5 - cam.rx), Math.round(ty * TS - 6 - cam.ry), 5, 22);
+        const x = tx * TS + i * 5 - cam.rx;
+        if (!drawArt('cop', x + 2, (ty + 1) * TS - cam.ry)) ctx.fillRect(Math.round(x), Math.round(ty * TS - 6 - cam.ry), 5, 22);
       }
     }
   }
@@ -224,6 +333,8 @@ export function createRenderer(canvas) {
       const sx = Math.round(e.rx - cam.rx);
       if (sx < -16 || sx > W) continue;
       const feet = Math.round(e.y - cam.ry);
+      const down = e.state === 'ko' || e.state === 'downed';
+      if (drawArt(down ? entityArt(e) + '_down' : walkArt(entityArt(e), e, e.rx), sx, feet)) continue;
       ctx.fillStyle = e.kind === 'ally' ? ALLY_COLORS[e.ally] : e.biker ? '#5a3a1e' : e.kind === 'goon' ? '#3a2e5a' : e.kind === 'saboteur' ? '#4a4a4a' : '#7a2e2e';
       if (e.state === 'ko' || e.state === 'downed') ctx.fillRect(sx - 11, feet - 6, 22, 6);
       else ctx.fillRect(sx - 6, feet - 22, 12, 22);
@@ -235,6 +346,7 @@ export function createRenderer(canvas) {
       const sx = Math.round(m.x - cam.rx);
       if (sx < -16 || sx > W) continue;
       const feet = Math.round((m.role === 'gardener' ? m.y + TS : state.surface[Math.max(0, Math.min(399, (m.x / TS) | 0))] * TS) - cam.ry);
+      if (drawArt(m.role + facing(m, m.x), sx, feet)) continue;
       ctx.fillStyle = colors[m.role];
       ctx.fillRect(sx - 6, feet - 22, 12, 22);
     }
@@ -242,15 +354,18 @@ export function createRenderer(canvas) {
     if (dog) {
       const sx = Math.round(dog.x - cam.rx);
       const feet = Math.round(state.surface[(dog.x / TS) | 0] * TS - cam.ry);
-      ctx.fillStyle = dog.hp > 0 ? '#9a6b3a' : '#6b6b6b';
-      ctx.fillRect(sx - 7, feet - 9, 14, 9);
+      if (!drawArt(dog.hp > 0 ? 'dog' + facing(dog, dog.x) : 'dog_down', sx, feet)) {
+        ctx.fillStyle = dog.hp > 0 ? '#9a6b3a' : '#6b6b6b';
+        ctx.fillRect(sx - 7, feet - 9, 14, 9);
+      }
     }
     ctx.fillStyle = '#ffe66b';
     for (const b of state.bullets || []) ctx.fillRect(Math.round(b.x - cam.rx), Math.round(b.y - cam.ry), 2, 2);
   }
 
-  function drawCar(sx, ground, color, lights) {
+  function drawCar(sx, ground, color, lights, art) {
     if (sx < -40 || sx > W) return;
+    if (drawArt(art, sx + 16, ground)) return; // art is 44 wide, centred on the old 32 px body
     ctx.fillStyle = color;
     ctx.fillRect(Math.round(sx), Math.round(ground - 12), 32, 10);
     ctx.fillRect(Math.round(sx + 8), Math.round(ground - 18), 16, 6);
@@ -260,17 +375,25 @@ export function createRenderer(canvas) {
   /** Buyers at their spots (marker sprite) and pedestrians (small figures). */
   function drawPeople(state) {
     for (const b of presentBuyers(state)) {
+      if (drawArt(BUYER_ART[b.key], b.x * TS + TS / 2 - cam.rx, state.surface[b.x] * TS - cam.ry)) continue;
       drawSprite('obj_skeet', b.x * TS - cam.rx, (state.surface[b.x] - 1) * TS - cam.ry);
     }
     ctx.fillStyle = '#8a7fa8';
-    for (const n of state.npcs) {
+    state.npcs.forEach((n, i) => {
       const sx = Math.round(n.x - cam.rx);
-      if (sx < -8 || sx > W) continue;
-      ctx.fillRect(sx - 3, Math.round(state.surface[(n.x / TS) | 0] * TS - 14 - cam.ry), 6, 14);
-    }
+      if (sx < -8 || sx > W) return;
+      const feet = state.surface[(n.x / TS) | 0] * TS - cam.ry;
+      if (drawArt(PED_ART[(n.id ?? i) % PED_ART.length] + facing(n, n.x), sx, feet)) return;
+      ctx.fillRect(sx - 3, Math.round(feet - 14), 6, 14);
+    });
   }
 
   function drawSprite(name, sx, sy) {
+    const ar = ready(ART_SHEET) && ART_RECTS[name];
+    if (ar) {
+      if (sy > -ar[3] && sy < H && sx > -ar[2] && sx < W) ctx.drawImage(ART_SHEET, ar[0], ar[1], ar[2], ar[3], sx, sy, ar[2], ar[3]);
+      return;
+    }
     const r = atlas.rects[name];
     if (!r || sy < -r[3] || sy > H || sx < -r[2] || sx > W) return;
     ctx.drawImage(atlas.canvas, r[0], r[1], r[2], r[3], sx, sy, r[2], r[3]);
@@ -343,9 +466,12 @@ export function createRenderer(canvas) {
       if (!chunksRendered) renderAllChunks(state); // boot: paint the world once
       updateCamera(state, dt);
       flushDirtyChunks(state);
-      ctx.drawImage(sky, 0, 0, 1, H, 0, 0, W, H); // 1px gradient stretched
-      drawHills();
+      if (!drawBackdrop()) {
+        ctx.drawImage(sky, 0, 0, 1, H, 0, 0, W, H); // 1px gradient stretched
+        drawHills();
+      }
       drawVisibleChunks(state);
+      drawBuildings(state);
       drawObjectsAndPlants(state);
       drawPeople(state);
       drawPolice(state);
