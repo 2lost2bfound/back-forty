@@ -611,3 +611,19 @@ test('jumping into a wall slides down: gravity applies while pressing in', () =>
     assert.ok(airFrames < 50, `dir ${dir}: no mid-air hang (${airFrames})`);
   }
 });
+
+test('climbing out of the top of a ladder stands on it; S climbs back down', () => {
+  const state = freshState();
+  const grid = state.tiles;
+  const lx = 300;
+  for (let y = 20; y <= 29; y++) grid[y * COLS + lx] = T.LADDER;
+  const p = placeAt(state, lx * TS + 2, 29 * TS - CONFIG.player.h);
+  const up = () => { const i = emptyInput(); i.up = true; return i; };
+  for (let i = 0; i < 300; i++) stepPlayer(state, up(), 1 / 60);
+  const ys = [];
+  for (let i = 0; i < 60; i++) { stepPlayer(state, up(), 1 / 60); ys.push(p.y); }
+  assert.ok(Math.max(...ys) - Math.min(...ys) < 0.5, `steady at the top (${Math.min(...ys)}..${Math.max(...ys)})`);
+  assert.ok(Math.abs(p.y + p.h - 20 * TS) < 1, 'feet on the top rung');
+  for (let i = 0; i < 30; i++) { const d = emptyInput(); d.down = true; stepPlayer(state, d, 1 / 60); }
+  assert.ok(p.y + p.h > 20 * TS + 4, 'S climbs back down');
+});

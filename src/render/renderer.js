@@ -163,9 +163,10 @@ export function createRenderer(canvas) {
   function drawBackdrop(state) {
     const dusk = backdropCanvas(BACKDROP);
     if (!dusk) return false;
-    paintBackdrop(dusk);
     const day = backdropCanvas(BACKDROP_DAY);
     const k = day ? dayWeight(state.time.hour) : 0;
+    if (k >= 1) { paintBackdrop(day); return true; } // full-screen fills are the costly part on integrated GPUs
+    paintBackdrop(dusk);
     if (k > 0) {
       ctx.globalAlpha = k;
       paintBackdrop(day);
@@ -260,9 +261,13 @@ export function createRenderer(canvas) {
       const sy = ground - h - cam.ry;
       if (sx > W || sx + w < 0 || sy > H || sy + h < 0) continue;
       const inside = pcx > b.x * TS && pcx < b.x * TS + w && p.y + p.h > ground - b.h * TS && p.y < ground;
-      if (inside) ctx.globalAlpha = 0.2;
-      ctx.drawImage(img, sx, sy, w, h);
-      ctx.globalAlpha = 1;
+      if (inside) {
+        // Faded cutaway, clipped to the tile box: the art's roof above it would float as a ghost.
+        const hh = Math.min(h, b.h * TS);
+        ctx.globalAlpha = 0.2;
+        ctx.drawImage(img, 0, h - hh, w, hh, sx, ground - hh - cam.ry, w, hh);
+        ctx.globalAlpha = 1;
+      } else ctx.drawImage(img, sx, sy, w, h);
     }
   }
 
@@ -352,8 +357,10 @@ export function createRenderer(canvas) {
       raidCops.length = raid.cops;
       for (let i = 0; i < raid.cops; i++) {
         const me = raidCops[i] || (raidCops[i] = {});
-        const x = px + i * 5 - cam.rx;
-        if (!drawArt(walkArt('cop', me, px + i * 5), x + 2, (ty + 1) * TS - cam.ry)) ctx.fillRect(Math.round(x), Math.round(ty * TS - 6 - cam.ry), 5, 22);
+        const wx = px + i * 20; // a file of officers, 20 px apart (the sprites are ~32 px wide)
+        const x = wx - cam.rx;
+        const feet = (i === 0 ? ty + 1 : state.surface[(wx / TS) | 0]) * TS - cam.ry;
+        if (!drawArt(walkArt('cop', me, wx), x + 2, feet)) ctx.fillRect(Math.round(x), Math.round(feet - 28), 5, 28);
       }
     }
   }

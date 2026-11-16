@@ -1,13 +1,14 @@
 // physics.js — AABB vs tiles and tile raycast (plan §B5).
 // Pure module: no window/document, runs unmodified in Node (plan §B3 rule).
 //
-// Rules: gravity 900, jump 300 (clears 3 tiles), player box 12x22, no slopes,
+// Rules: gravity 900, jump 300 (clears 3 tiles), player box 12x44, no slopes,
 // no tile physics. Platforms are one-way: they only catch a body that was
-// above their top edge on the previous sub-step and is falling. Movement is
+// above their top edge on the previous sub-step and is falling. The top rung
+// of a ladder is one-way too, so climbing out stands on it instead of bouncing. Movement is
 // sub-stepped so nothing tunnels through a 16 px tile.
 
 import { CONFIG } from '../config.js';
-import { tileAt, isSolidId, isPlatformId } from './tiles.js';
+import { tileAt, isSolidId, isPlatformId, T } from './tiles.js';
 
 const TS = CONFIG.world.tile;
 const EPS = CONFIG.physics.eps;
@@ -37,7 +38,8 @@ function landingBlocked(grid, x, y, w, h, prevBottom, allowPlatform) {
     for (let tx = x0; tx <= x1; tx++) {
       const id = tileAt(grid, tx, ty);
       if (isSolidId(id)) return true;
-      if (allowPlatform && isPlatformId(id) && prevBottom <= ty * TS + EPS) return true;
+      const ladderTop = id === T.LADDER && tileAt(grid, tx, ty - 1) !== T.LADDER;
+      if (allowPlatform && (isPlatformId(id) || ladderTop) && prevBottom <= ty * TS + EPS) return true;
     }
   }
   return false;

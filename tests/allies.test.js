@@ -791,3 +791,11 @@ test('allies round-trip through save/load and old saves get a fresh block', () =
   run(a, 200); run(b, 200);
   assert.equal(JSON.stringify(a.allies), JSON.stringify(b.allies));
 });
+
+test('no ally, buyer or flower spot sits within E reach of a shop door (E picks the nearest)', () => {
+  const C = CONFIG, reach = C.player.interactTiles;
+  const doors = Object.values(C.economy).filter((v) => v && v.building)
+    .map((v) => C.world.buildings.find((b) => b.key === v.building)).filter(Boolean).map((b) => b.x + b.w - 1);
+  const people = [...Object.values(C.allies.defs).map((d) => d.spot.x), ...Object.values(C.economy.buyers).map((b) => b.x), C.allies.flowers.x];
+  for (const d of doors) for (const x of people) assert.ok(Math.abs(d - x) > 2 * reach, `spot ${x} overlaps the door at ${d}`);
+});

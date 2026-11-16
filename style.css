@@ -288,6 +288,14 @@ body {
 }
 
 .menu-btn:hover:not(:disabled) { background: #26344f; }
+.menu-row select {
+  padding: 2px 6px;
+  font-family: monospace;
+  font-size: 12px;
+  color: #eaf2ff;
+  background: #1a2438;
+  border: 1px solid #3d4f78;
+}
 .menu-btn:disabled { opacity: 0.4; cursor: default; }
 
 .menu-note {

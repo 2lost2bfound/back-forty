@@ -347,3 +347,11 @@ test('balance bot: 45-day table reaches $15,000 gross with no threats', () => {
   assert.equal(rows.length, 45);
   assert.ok(rows[44].gross >= 15000, `gross ${rows[44].gross}`);
 });
+
+test('every item in every shop has a real price (a comment once swallowed the soil prices)', () => {
+  const s = newGame(1);
+  s.player.level = 10; s.license.granted = { day: 1 }; // unlock every strain, breeding and the stove
+  for (const shop of Object.keys(CONFIG.economy.stock)) {
+    for (const item of shopStock(shop, s)) assert.ok(Number.isFinite(item.price) && item.price >= 0, `${shop}: ${item.key} costs ${item.price}`);
+  }
+});

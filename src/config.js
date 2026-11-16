@@ -411,7 +411,8 @@ export const CONFIG = {
     alleyGunMarkup: 0.5,                  // unregistered guns cost +50%
     prices: {
       seeds: 20, seeds_blue: 60, seeds_widow: 150, pot: 10,
-      seeds_male_ditch: 30, seeds_male_blue: 90, seeds_male_widow: 225, // L6: guaranteed-male seeds to start breeding soil_potting: 15, soil_living: 40,
+      seeds_male_ditch: 30, seeds_male_blue: 90, seeds_male_widow: 225, // L6: guaranteed-male seeds to start breeding
+      soil_potting: 15, soil_living: 40,
       nutrients: 20, phkit: 10, pollenkit: 150,
       moisture_meter: 30, ph_meter: 60, loupe: 25, rack: 50,
       neem: 15, lamp_cfl: 80, lamp_hps: 300, lamp_led: 700, drip: 400,
@@ -477,16 +478,16 @@ export const CONFIG = {
     // Buyers (plan §A7 table). x is the tile the buyer stands on; open/close
     // wrap past midnight. weekdays: only on days where day % 7 is listed.
     buyers: {
-      skeet:  { name: 'Skeet', where: 'park', x: 265, open: 12, close: 22,
+      skeet:  { name: 'Skeet', where: 'park', x: 267, open: 12, close: 22,
         min: 14, max: 28, everyDays: 2, minQ: 20, mod: 1.0, deadlineGh: 24,
         start: true, firstOrderGh: 144, heat: true },
       marla:  { name: 'Marla', where: 'bar', x: 284, open: 16, close: 2,
         min: 56, max: 112, everyDays: 3, minQ: 35, mod: 1.0, deadlineGh: 24, heat: true },
-      doc:    { name: 'Doc Renner', where: 'clinic back door', x: 326, open: 18, close: 21,
+      doc:    { name: 'Doc Renner', where: 'clinic back door', x: 328, open: 18, close: 21,
         min: 84, max: 168, everyDays: 4, minQ: 55, mod: 1.15, deadlineGh: 24, heat: false },
-      tone:   { name: 'Big Tone', where: 'alley garage', x: 345, open: 14, close: 24,
+      tone:   { name: 'Big Tone', where: 'alley garage', x: 346, open: 14, close: 24,
         min: 224, max: 448, everyDays: 5, minQ: 40, mod: 0.9, deadlineGh: 48, heat: true, dale: true },
-      vivian: { name: 'Vivian', where: 'motel', x: 384, open: 20, close: 3,
+      vivian: { name: 'Vivian', where: 'motel', x: 386, open: 20, close: 3,
         min: 448, max: 900, everyDays: 7, minQ: 60, mod: 1.0, deadlineGh: 48, heat: true, dale: true,
         weekdays: [5, 6, 0] },
     },
@@ -714,13 +715,13 @@ export const CONFIG = {
     flowers: { x: 262, perDay: 1 },                // park pickup tile
     defs: {
       walt: { name: 'Walt', hp: 90, weapon: 'rifle', dmg: 40, acc: 0.8, rate: 0.7, rangeTiles: 24, speed: 70, armed: true,
-        spot: { x: 181, open: 6, close: 20 }, home: 200, deliverTo: 254,
+        spot: { x: 182, open: 6, close: 20 }, home: 200, deliverTo: 256,
         loved: ['whiskey'], liked: ['wood'], disliked: ['crank', 'blues'] },
       benny: { name: 'Benny', hp: 130, weapon: 'bat', dmg: 18, acc: 0.9, rate: 2, rangeTiles: 1.75, speed: 120, armed: false, melee: true,
-        spot: { x: 232, open: 9, close: 18 }, home: 228, deliverTo: 181,
+        spot: { x: 232, open: 9, close: 18 }, home: 228, deliverTo: 182,
         loved: ['beer'], liked: ['bike_parts'], disliked: [] },
       june: { name: 'June', hp: 70, weapon: 'shotgun', dmg: 54, acc: 0.6, rate: 1, rangeTiles: 9, speed: 90, armed: true,
-        spot: { x: 254, open: 8, close: 18 }, home: 270, deliverTo: 309,
+        spot: { x: 256, open: 8, close: 18 }, home: 270, deliverTo: 309,
         loved: ['bud'], liked: ['coffee'], disliked: [] },
       rosa: { name: 'Rosa', hp: 60, weapon: null, speed: 90, armed: false, heals: true, healHps: 5, healTiles: 3,
         spot: { x: 309, open: 8, close: 18 }, home: 300, deliverTo: 232,
@@ -875,7 +876,9 @@ export const CONFIG = {
   },
   // Automatic quality step-down (My Addition 12): average frame time over the
   // window above the limit steps down one level (particles, soft lights, peds).
-  quality: { avgMs: 18, workAvgMs: 12, windowS: 2, particleScale: 0.5, pedCap: 4, maxLevel: 3 },
+  quality: { workAvgMs: 12,   // avgMs: below ~48 fps (HSW GT1 runs 52-60 fps fine)
+    windowS: 2, particleScale: 0.5, pedCap: 4, maxLevel: 3,
+    warmupS: 5, hitchMs: 100, badWindows: 2 },  // ignore loading, single stalls and one bad window
   // First-time tips: shown once each, the first time the situation arises.
   tips: {
     start: 'Water and feed your plants, harvest when ripe, sell to Skeet in the park. Tab opens your phone.',

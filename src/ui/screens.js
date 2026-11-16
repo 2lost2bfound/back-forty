@@ -9,6 +9,7 @@
 import { CONFIG } from '../config.js';
 import { browserStorage, slotKey, autoKey, serializeState } from '../state.js';
 import * as audio from '../audio/audio.js';
+import { setQualityMode } from '../quality.js';
 
 const fire = (name, detail) => window.dispatchEvent(new CustomEvent(name, { detail }));
 
@@ -51,6 +52,7 @@ export function initScreens() {
   let open = null;
   let difficulty = 'standard';
   const settings = loadSettings();
+  setQualityMode(settings.effects);
 
   const panels = {};
   for (const k of ['title', 'pause', 'settings', 'win', 'cup', 'export']) {
@@ -146,6 +148,13 @@ export function initScreens() {
     const musicOff = el('input', '', mo);
     musicOff.type = 'checkbox'; musicOff.checked = vols.musicOff;
     musicOff.onchange = () => audio.setMusicOff(musicOff.checked);
+    const er = el('div', 'menu-row', body, 'Effects ');
+    const fx = el('select', '', er);
+    for (const [v, label] of [['auto', 'Auto'], ['high', 'High'], ['low', 'Low']]) {
+      const o = el('option', '', fx, label); o.value = v;
+    }
+    fx.value = settings.effects || 'auto';
+    fx.onchange = () => { settings.effects = fx.value; saveSettings(settings); setQualityMode(fx.value); };
     const tr = el('div', 'menu-row', body, 'First-time tips ');
     const tips = el('input', '', tr);
     tips.type = 'checkbox'; tips.checked = settings.tips;

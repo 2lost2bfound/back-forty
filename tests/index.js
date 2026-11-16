@@ -18,3 +18,4 @@ import './addiction.test.js';
 import './allies.test.js';
 import './license.test.js';
 import './edibles.test.js';
+import './quality.test.js';

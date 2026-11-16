@@ -12,7 +12,7 @@ import { createRenderer } from './render/renderer.js';
 import { initHud } from './ui/hud.js';
 import { initMenus } from './ui/menus.js';
 import { initScreens } from './ui/screens.js';
-import { feedFrame } from './quality.js';
+import { feedFrame, warmUp } from './quality.js';
 import { createPerf } from './perf.js';
 import { startStress, stepStress, stopStress } from './dev/stress.js';
 import { enterLegacy } from './sim/license.js';
@@ -63,6 +63,7 @@ function adopt(next, msg) {
   screens.closeAll();
   menus.closeAll();
   renderer.invalidate();
+  warmUp(); // the first frames repaint the whole world
   if (msg) hud.toast(msg);
   tip('start');
   tip('store'); // day-1 must: nutrients + pH kit (a never-shopping player loses the first plant by day 3)
@@ -387,7 +388,7 @@ function frame(now) {
   // overlay and window.__perf; the quality step-down keys off both (quality.js).
   const work = performance.now() - t0;
   perf.record(work, rawMs);
-  if (feedFrame(Math.min(rawMs, 100), work)) hud.toast('Reduced effects to keep the game smooth.');
+  if (feedFrame(rawMs, work)) hud.toast('Reduced effects to keep the game smooth.');
   updateOverlay(now);
 
   requestAnimationFrame(frame);
@@ -412,6 +413,7 @@ function toggleStress() {
 
 // ------------------------------------------------- save/load UI hooks ----
 
+document.addEventListener('visibilitychange', () => { if (!document.hidden) warmUp(); });
 window.addEventListener('backforty:assign', (e) => {
   if (assignHotbar(state, state.player.hotbarIndex, e.detail.key)) {
     hud.toast(`Assigned to slot ${state.player.hotbarIndex + 1}.`);
@@ -453,7 +455,7 @@ const perf = createPerf();
 if (CONFIG.dev.exposeGlobals) {
   window.__perf = perf;                              // rolling + since-reset stats, perf.reset()
   window.__dev = {
-    stress: toggleStress, state: () => state,
+    stress: toggleStress, state: () => state, cam: () => renderer.cam,
     // M11 test shortcuts: __dev.level(6) sets Grower level and XP; __dev.legacy() grants the license and enters Legacy mode.
     level: (n) => { state.player.level = n; state.player.xp = CONFIG.mastery.levelXp[n - 1]; },
     legacy: () => { state.license.granted = state.license.granted || { day: state.time.day }; state.won = state.won || { day: state.time.day }; state.legacy = true; },
