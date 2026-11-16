@@ -1,0 +1,20 @@
+Back Forty art license
+
+Copyright (c) 2026 Back Forty contributors
+
+The art in this repository is licensed under the Creative Commons
+Attribution-NonCommercial 4.0 International License (CC BY-NC 4.0):
+
+  assets/   the sprite atlas, building facades and backdrops the game loads
+  art/      the source sheets they are cut from (characters, buildings,
+            props, walk frames)
+
+You may share and adapt this art for non-commercial purposes, as long as you
+give appropriate credit ("Back Forty contributors"), link to the license, and
+indicate if changes were made. You may not use it for commercial purposes.
+
+Full license text: https://creativecommons.org/licenses/by-nc/4.0/legalcode
+Summary:           https://creativecommons.org/licenses/by-nc/4.0/
+
+The source code (everything else, including src/render/spritedata.js and the
+procedural fallback sprites it draws) is MIT licensed: see LICENSE.

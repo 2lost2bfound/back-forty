@@ -1,91 +1,108 @@
 # Back Forty
 
-A 2D side-view sandbox about running an illegal cannabis grow and going legit.
-Raw Canvas 2D + vanilla JavaScript ES modules — zero runtime dependencies, no
-build step. See `plan.md` for the full design and build plan.
+A 2D side-scrolling sandbox about running an illegal cannabis grow on a patch
+of desert and going legit before the law, rivals or your own habits catch up.
 
-**Status: v1.1 — all milestones (M0–M12) built; hand-directed pixel art in progress.**
+Grow and breed strains, dry and sell your harvest to five buyers with their own
+moods and schedules, keep your heat down, hire a crew, make friends in town,
+launder cash through a farm stand and apply for a license. Once licensed,
+Legacy mode lets you keep playing.
 
-## Run
+Plain Canvas 2D and vanilla JavaScript ES modules: no runtime dependencies and
+no build step. The full design lives in [`plan.md`](plan.md).
 
-ES modules do not load from `file://`, so serve the project root:
+## Play
+
+### Desktop app (recommended)
+
+Needs [Node.js](https://nodejs.org/) 20 or newer.
+
+```sh
+npm install
+npm start
+```
+
+F11 toggles fullscreen. The app keeps its own saves.
+
+### In a browser
+
+ES modules do not load from `file://`, so serve the folder and open it in
+Chrome or Firefox:
 
 ```sh
 python3 -m http.server 8000
 ```
 
-Then open `http://localhost:8000` in Chrome. The game renders at an internal
-800×450 and is CSS-scaled to fit the window at 16:9 with crisp pixels.
+Then go to `http://localhost:8000`. To move a game between the browser and the
+app, use **Export save** in the pause menu and **Import save** on the title
+screen.
 
-## Test
-
-Node is a dev tool only (no npm packages are used at runtime):
-
-```sh
-node --test tests/
-```
-
-(Also works: bare `node --test` or `node --test tests/*.test.js`. Note that on
-Node ≥ 21 a bare directory argument is executed instead of searched — upstream
-regression nodejs/node#64555 — which is why `tests/index.js` exists.)
-
-## Keys (so far)
+## Controls
 
 | Key | Action |
 |---|---|
-| A / D | Walk left / right (90 px/s; Shift sprints at 140 px/s, costs stamina) |
-| W / Space | Jump (clears 3 tiles); climbs a ladder while touching one |
-| S | Drop through a placed platform |
-| Mouse move | Aim |
-| Left click (hold) | Dig the aimed tile (dirt 0.4 s; stone 1.5 s, needs the pickaxe) |
-| Right click | Place the selected tile |
-| 1 / 2 / 3 | Select dirt / wood / ladder for placing |
-| F3 | Perf overlay: fps, frame ms, entity/particle counts |
-| F4 | Toggle the stress scene (2,000 moving test rectangles; the 60 fps perf gate of plan §B2) |
+| A / D | Walk (hold Shift to sprint) |
+| W / Space | Jump; climb a ladder |
+| S | Climb down; drop through a platform |
+| E | Use what is in front of you: shops, buyers, people, pots, racks, bed, water |
+| Left click | Water / feed / tend the aimed plant with the selected tool; hold to dig |
+| Right click | Place the selected item or tile (pots, racks, lamps, dirt, ladders...) |
+| 1–8, mouse wheel | Pick a hotbar slot |
+| Tab | Phone: orders, contacts, ledger, heat, crew, allies, journal |
+| I | Inventory (assign items to the hotbar) |
+| Q | Pick which seeds to plant |
+| C | Take a cutting (clone); cull a male plant |
+| Alt (hold) | Show water / pH / nutrient bars over your plants |
+| B | Get on or off the bicycle |
+| R | Reload |
+| Esc | Pause menu: save, load, export, settings |
+| F3 | Performance overlay |
+| F11 | Fullscreen (desktop app) |
 
-Digging and placing only work on your lot (tiles 40–139). Digging dirt returns
-it to a stack for refilling holes; wood and ladders return themselves.
+Settings has volume sliders, **Mute music** and **Effects** (Auto / High / Low).
 
-## Perf gate
+## Develop
 
-Every milestone must pass: with F4 on, the F3 overlay must show average frame
-time ≤ 12 ms and no frame over 20 ms across 60 s on the target machine
-(2-core Celeron, Haswell GT1) in Chrome. M1 additionally targets ≤ 8 ms
-average without stress (plan §B2 / M1 "Done when").
+```sh
+npm test                    # unit tests (node --test)
+node tools/balance.js 1     # headless balance bot: one 45-day run, seed 1
+node tools/balance.js --sweep 10
+```
 
-## Structure
+Every tunable number is in `src/config.js`. The simulation (`src/sim/`,
+`src/world/`, `src/entities/player.js`) never touches `window`, `document`,
+canvas or audio, so it runs unchanged in Node for the tests and the balance bot.
 
 ```
-index.html            canvas + #ui root, loads src/main.js as a module
-style.css             HUD and menu styles
+index.html, style.css    page, HUD and menu styles
+electron/main.cjs        desktop wrapper (serves the game from an app:// scheme)
 src/
-  main.js             boot, fixed-step loop (60 Hz physics, 2 Hz sim), perf overlay
-  config.js           every tunable number, grouped by system
-  rng.js              seeded PRNG (mulberry32) + helpers
-  state.js            newGame() (save/load arrives in M2)
-  world/
-    tiles.js          tile table, grid access, dig/place rules
-    worldgen.js       the one authored world: terrain, shack, town
-    physics.js        AABB vs tiles (sub-stepped), one-way platforms, raycast
-  entities/
-    player.js         movement, stamina, ladders, dig/place actions
-  render/
-    spritedata.js     pixel art as string arrays + palettes
-    sprites.js        paints the 512x512 atlas at boot (tiles + player, both facings)
-    renderer.js       camera, sky, hills, 100 tile chunks (2 dirty redraws/frame)
-  ui/input.js         keyboard/mouse state
-tests/
-  rng.test.js         PRNG determinism and helper bounds
-  world.test.js       M1: worldgen, tiles, physics, player movement and digging
+  main.js                boot, fixed-step loop, save/load wiring
+  config.js              every tunable number
+  state.js               new game, save format, old-save migration
+  sim/                   plants, genetics, economy, heat, threats, crew, allies,
+                         addiction, license, edibles, time
+  world/                 tiles, world generation, physics, pathfinding, rooms
+  entities/              player, combat, NPCs, dog, spawning
+  render/                renderer, lighting, particles, sprite atlas
+  audio/                 synthesized sound effects and music
+  ui/                    HUD, menus, title/pause/settings screens, input
+tests/                   node:test suites
+tools/
+  balance.js             headless balance bot
+  extract_art.py         cuts art/ sheets into assets/ and src/render/artdata.js
+assets/                  art the game loads
+art/                     source art sheets
 ```
 
-Rules kept from plan §B3: nothing under `src/sim/` or `src/world/` may
-reference `window`, `document`, canvas or audio — those modules (plus
-`src/entities/player.js`) run unmodified in Node for tests and
-`tools/balance.js` (M3). The frame loop allocates nothing; input is a reused
-plain object and the stress pool is one preallocated `Float32Array`.
+`build.sh` and `chain.sh` are the scripts the milestones in `plan.md` were
+originally built with; you don't need them to play or develop.
 
-## Tuning
+## License
 
-All numbers live in `src/config.js`, grouped by system. Do not inline
-constants in game code.
+- **Code:** MIT. See [LICENSE](LICENSE).
+- **Art** (`assets/`, `art/`): CC BY-NC 4.0, free to share and adapt for
+  non-commercial use with credit. See [LICENSE-ART](LICENSE-ART).
+
+The pixel art was generated with Google's Nano Banana Pro image model and
+hand-picked, cut and assembled for the game.
